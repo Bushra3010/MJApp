@@ -5,6 +5,7 @@ import { useToast } from '../../lib/toast.jsx';
 import TopBar from '../../components/TopBar.jsx';
 import Coins from '../../components/Coins.jsx';
 import { buyPack } from '../../lib/razorpay.js';
+import Icon from '../../components/Icon.jsx';
 
 const KIND = { payout_reversed: 'Payout returned', purchase: 'Bought coins', bonus: 'Bonus', call: 'Call', chat: 'Chat', gift: 'Gift', admin_credit: 'Added by support', admin_debit: 'Adjusted by support' };
 
@@ -31,7 +32,7 @@ export default function Wallet() {
       <TopBar title="Wallet" right={null} />
       <div className="page">
         <div className="balance-card">
-          <div style={{ fontWeight: 800, opacity: .9 }}>Your balance</div>
+          <div className="row" style={{ fontWeight: 800, opacity: .92 }}><Icon name="wallet" size={18} />Your balance</div>
           <div className="amt"><Coins value={user.coins} /></div>
           <div style={{ fontWeight: 700, opacity: .9, fontSize: 13 }}>Use coins for calls, chats and gifts</div>
         </div>
@@ -40,7 +41,7 @@ export default function Wallet() {
         <div className="section-title">Add coins</div>
         <div className="pack-grid">
           {(w?.packs || cfg.packs || []).map((p) => (
-            <button key={p.id} className="card pack" onClick={() => buy(p)} disabled={!!buying || cfg.payments === 'off'}>
+            <button key={p.id} className={`card pack ${p.tag ? 'hot' : ''}`} onClick={() => buy(p)} disabled={!!buying || cfg.payments === 'off'}>
               {p.tag && <span className="tag">{p.tag}</span>}
               <div className="c coin">{p.coins.toLocaleString('en-IN')}</div>
               <div className="p">{buying === p.id ? 'Opening…' : `₹${p.price}`}</div>
@@ -49,9 +50,10 @@ export default function Wallet() {
         </div>
         <p className="faint" style={{ marginTop: -10, marginBottom: 8 }}>Secure payments by Razorpay · UPI, cards, netbanking, wallets. <a className="link" href="/refunds">Refund policy</a></p>
         <div className="section-title">Every coin, accounted for</div>
-        {!w ? <div className="spinner" /> : w.transactions.length === 0 ? <p className="faint">No transactions yet.</p> : w.transactions.map((t) => (
+        {!w ? <div className="spinner" /> : w.transactions.length === 0 ? <p className="faint">No transactions yet.</p> : <div className="card txn-list">{w.transactions.map((t) => (
           <div key={t.id} className="txn">
-            <div style={{ minWidth: 0 }}>
+            <span className={`ic ${t.amount > 0 ? 'plus' : ''}`}><Icon name={t.kind === 'call' ? 'phone' : t.kind === 'chat' ? 'chat' : t.kind === 'gift' ? 'gift' : t.amount > 0 ? 'plus' : 'coin'} size={18} /></span>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <b style={{ display: 'block' }}>{KIND[t.kind] || t.kind}</b>
               <span className="faint">{t.note} · {timeAgo(t.created_at)}{t.kind === 'purchase' && t.ref ? ` · ${t.ref}` : ''}</span>
             </div>
@@ -60,7 +62,7 @@ export default function Wallet() {
               <div className="faint">bal {t.balance_after}</div>
             </div>
           </div>
-        ))}
+        ))}</div>}
       </div>
     </>
   );

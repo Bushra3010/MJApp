@@ -28,16 +28,16 @@ export default function Chats() {
       <div className="page">
         {!list ? <div className="spinner" /> : list.length === 0 ? (
           <div className="empty"><div className="big">💬</div><b>No chats yet</b><p>{user.role === 'host' ? 'When users message you, they show up here.' : 'Find someone on Discover and say hi.'}</p></div>
-        ) : list.map((c) => (
-          <Link key={c.id} to={`${base}/chat/${c.id}`} className="list-row">
+        ) : <div className="chat-list">{list.map((c, i) => (
+          <Link key={c.id} to={`${base}/chat/${c.id}`} className="list-row rise" style={{ '--i': i }}>
             <Avatar src={c.other_avatar} name={c.other_name} size={52} online={user.role === 'user' ? !!c.online : undefined} busy={!!c.busy} />
-            <div className="txt"><b>{c.other_name}</b><span>{preview(c)}</span></div>
+            <div className="txt"><b>{c.other_name}</b><span className={c.unread > 0 ? 'unread' : ''}>{preview(c)}</span></div>
             <div style={{ textAlign: 'right' }}>
               <div className="faint">{timeAgo(c.last_message_at)}</div>
               {c.unread > 0 && <span className="badge">{c.unread}</span>}
             </div>
           </Link>
-        ))}
+        ))}</div>}
       </div>
     </>
   );

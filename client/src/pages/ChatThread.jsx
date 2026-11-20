@@ -71,7 +71,7 @@ export default function ChatThread() {
   return (
     <div className="chat">
       <header className="topbar">
-        <button onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button>
+        <button className="icon-btn clear press" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button>
         <Avatar src={conv.other.avatar} name={conv.other.name} size={40} online={isUser ? !!conv.host.online : undefined} busy={!!conv.host.busy} />
         <div style={{ minWidth: 0 }}>
           <b style={{ display: 'block' }}>{conv.other.name}</b>
@@ -79,10 +79,10 @@ export default function ChatThread() {
         </div>
         <div className="spacer" />
         {isUser && <>
-          <button className="mini-btn" style={{ width: 40 }} disabled={!avail} onClick={() => call('audio')} aria-label="Audio call"><Icon name="phone" size={18} /></button>
-          <button className="mini-btn video" style={{ width: 40 }} disabled={!avail} onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={18} /></button>
+          <button className="mini-btn" style={{ width: 40, flexShrink: 0 }} disabled={!avail} onClick={() => call('audio')} aria-label="Audio call"><Icon name="phone" size={18} /></button>
+          <button className="mini-btn video" style={{ width: 40, flexShrink: 0 }} disabled={!avail} onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={18} /></button>
         </>}
-        <button onClick={() => setMenu(true)} aria-label="More"><Icon name="more" /></button>
+        <button className="icon-btn clear press" onClick={() => setMenu(true)} aria-label="More"><Icon name="more" /></button>
       </header>
       <div className="msgs">
         {msgs.length === 0 && <div className="empty"><div className="big">👋</div><p>Say hi to {conv.other.name}!{isUser && cfg.chatCost > 0 ? ` Each message costs ${cfg.chatCost} coin.` : ''}</p></div>}
@@ -95,13 +95,13 @@ export default function ChatThread() {
           }
           return <div key={m.id} className={`bubble ${mine ? 'me' : 'them'}`}>{m.body}<time>{clock(m.created_at)}</time></div>;
         })}
-        {typing && <div className="bubble them" style={{ opacity: .7 }}>typing…</div>}
+        {typing && <div className="bubble them typing" aria-label="typing"><i /><i /><i /></div>}
         <div ref={end} />
       </div>
       <form className="composer" onSubmit={send}>
-        {isUser && <button type="button" className="gift-btn" aria-label="Send a gift" onClick={() => api('/gifts').then(setGifts)}>🎁</button>}
+        {isUser && <button type="button" className="gift-btn" aria-label="Send a gift" onClick={() => api('/gifts').then(setGifts)}><Icon name="gift" size={22} /></button>}
         <input className="input" placeholder={isUser && cfg.chatCost > 0 ? `Message · ${cfg.chatCost} coin` : 'Message'} value={text} onChange={onType} maxLength={2000} />
-        <button className="send" aria-label="Send"><Icon name="send" size={20} /></button>
+        <button className="send" aria-label="Send" disabled={!text.trim()}><Icon name="send" size={20} /></button>
       </form>
       {gifts && (
         <Sheet title={`Send ${conv.other.name} a gift`} onClose={() => setGifts(null)}>

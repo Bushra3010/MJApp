@@ -13,7 +13,7 @@ export default function CallHistory() {
   useEffect(() => { api('/calls').then(setCalls); }, []);
   return (
     <>
-      <header className="topbar"><button onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button><h1>Call history</h1></header>
+      <header className="topbar"><button className="icon-btn press" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button><h1>Call history</h1></header>
       <div className="page">
         {!calls ? <div className="spinner" /> : calls.length === 0 ? <div className="empty"><div className="big">📞</div><b>No calls yet</b></div> : calls.map((c) => (
           <div key={c.id} className="list-row">

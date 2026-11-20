@@ -32,32 +32,34 @@ export default function HostProfile() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <button onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button>
-        <div className="spacer" />
-        <button onClick={() => setMenu(true)} aria-label="More"><Icon name="more" /></button>
-      </header>
+      <div className="cover">
+        {h.avatar && <img src={h.avatar} alt="" />}
+        <div className="cover-bar">
+          <button className="icon-btn press" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button>
+          <button className="icon-btn press" onClick={() => setMenu(true)} aria-label="More"><Icon name="more" /></button>
+        </div>
+      </div>
       <div className="page">
         <div className="profile-hero">
-          <Avatar src={h.avatar} name={h.name} size={128} online={!!h.online} busy={!!h.busy} />
+          <Avatar src={h.avatar} name={h.name} size={132} online={!!h.online} busy={!!h.busy} className="ringed" />
           <h2>{h.name}</h2>
-          <p className="muted">{[h.city, h.gender && h.gender[0].toUpperCase() + h.gender.slice(1)].filter(Boolean).join(' · ')}</p>
-          <div style={{ marginTop: 8 }}>
+          <p className="muted" style={{ fontWeight: 700 }}>{[h.city, h.gender && h.gender[0].toUpperCase() + h.gender.slice(1)].filter(Boolean).join(' · ')}</p>
+          <div style={{ marginTop: 10 }}>
             <span className={`chip ${avail ? 'chip-green' : h.busy ? 'chip-amber' : 'chip-grey'}`}>{avail ? '● Online now' : h.busy ? 'On another call' : 'Offline'}</span>
           </div>
         </div>
-        {h.bio && <div className="card" style={{ padding: 16, marginBottom: 12 }}><p>{h.bio}</p></div>}
-        <div className="stat-row">
-          <div className="card stat"><b>{h.calls}</b><span>Calls</span></div>
-          <div className="card stat"><b>{Math.round(h.seconds / 60)}</b><span>Minutes</span></div>
-          <div className="card stat"><b>{h.languages.split(',').length}</b><span>Languages</span></div>
+        <div className="card stat-group">
+          <div><b>{h.calls}</b><span>Calls</span></div>
+          <div><b>{Math.round(h.seconds / 60)}</b><span>Minutes</span></div>
+          <div><b>{h.languages.split(',').length}</b><span>Languages</span></div>
         </div>
-        <div className="filters" style={{ flexWrap: 'wrap' }}>{h.languages.split(',').map((l) => <span key={l} className="chip">{l}</span>)}</div>
+        {h.bio && <div className="card" style={{ padding: 16, marginBottom: 14 }}><div className="faint" style={{ fontWeight: 800, marginBottom: 4 }}>About</div><p style={{ lineHeight: 1.5 }}>{h.bio}</p></div>}
+        <div className="lang-chips">{h.languages.split(',').map((l) => <span key={l} className="chip">{l}</span>)}</div>
         <div className="rate-row">
-          <div className="card rate"><Icon name="phone" /><b><Coins value={h.audio_rate} /></b><span className="faint">per min · audio</span></div>
-          <div className="card rate"><Icon name="video" /><b><Coins value={h.video_rate} /></b><span className="faint">per min · video</span></div>
+          <div className="card rate"><span className="ic"><Icon name="phone" size={20} /></span><b><Coins value={h.audio_rate} /></b><span className="faint">per min · audio</span></div>
+          <div className="card rate"><span className="ic"><Icon name="video" size={20} /></span><b><Coins value={h.video_rate} /></b><span className="faint">per min · video</span></div>
         </div>
-        <p className="faint" style={{ textAlign: 'center' }}>You're charged per started minute. You'll see the coins spent live during the call.</p>
+        <p className="faint" style={{ textAlign: 'center', padding: '0 12px' }}>You're charged per started minute. You'll see the coins spent live during the call.</p>
       </div>
       <div className="cta-bar">
         <button className="btn btn-ghost" onClick={() => openChat(nav, h.id, toast)}><Icon name="chat" size={18} />Chat</button>

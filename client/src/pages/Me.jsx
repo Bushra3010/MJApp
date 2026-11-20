@@ -6,6 +6,7 @@ import { useToast } from '../lib/toast.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Icon from '../components/Icon.jsx';
+import Coins from '../components/Coins.jsx';
 import { preparePhoto } from '../lib/image.js';
 
 export default function Me() {
@@ -36,26 +37,38 @@ export default function Me() {
     <>
       <TopBar title="Profile" />
       <div className="page">
-        <div className="profile-hero">
-          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Change photo" style={{ position: 'relative', display: 'block', margin: '0 auto' }}>
-            <Avatar src={user.avatar} name={user.name} size={96} />
-            <span className="chip" style={{ position: 'absolute', bottom: -6, left: '50%', transform: 'translateX(-50%)', background: 'var(--surface)', boxShadow: 'var(--shadow-sm)' }}>{uploading ? '…' : '📷 Edit'}</span>
+        <div className="me-hero">
+          <button type="button" onClick={() => fileRef.current?.click()} aria-label="Change photo" className="press" style={{ position: 'relative', borderRadius: '50%' }}>
+            <Avatar src={user.avatar} name={user.name} size={76} />
+            <span className="cam-badge">{uploading ? '…' : <Icon name="camera" size={16} />}</span>
           </button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPhoto} />
-          <h2 style={{ fontSize: 22, marginTop: 14 }}>{user.name}</h2>
-          <p className="faint">{user.email} · {user.role === 'host' ? 'Host' : 'Member'}</p>
+          <div style={{ minWidth: 0 }}>
+            <h2>{user.name}</h2>
+            <p>{user.email}</p>
+            <span className="chip" style={{ marginTop: 8, background: 'rgba(255,255,255,.22)', color: '#fff' }}>{user.role === 'host' ? '★ Host' : '♥ Member'}</span>
+          </div>
         </div>
-        <Link to={`${base}/calls`} className="card list-row" style={{ padding: '14px 16px', marginBottom: 16 }}>
-          <Icon name="history" /><div className="txt"><b>Call history</b></div><Icon name="back" style={{ transform: 'rotate(180deg)' }} />
-        </Link>
-        <form onSubmit={save} className="card" style={{ padding: 16 }}>
-          <div className="field"><label htmlFor="n">Name</label><input id="n" className="input" value={f.name} onChange={set('name')} /></div>
-          <div className="field"><label htmlFor="c">City</label><input id="c" className="input" value={f.city} onChange={set('city')} /></div>
-          <div className="field"><label htmlFor="l">Languages (comma separated)</label><input id="l" className="input" value={f.languages} onChange={set('languages')} /></div>
-          <div className="field"><label htmlFor="b">About you</label><textarea id="b" rows={3} className="input" value={f.bio} onChange={set('bio')} maxLength={300} /></div>
-          <button className="btn btn-primary btn-block" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
-        </form>
-        <Link to={`${base}/settings`} className="btn btn-outline btn-block" style={{ marginTop: 16 }}><Icon name="gear" size={18} />Settings & account</Link>
+
+        <div className="card menu-card">
+          {user.role === 'user' && (
+            <Link to="/app/wallet" className="menu-row"><span className="ic amber"><Icon name="wallet" size={20} /></span><span className="t">Wallet<small>Balance and coin history</small></span><Coins value={user.coins} /><Icon name="chevron" size={18} className="chev" /></Link>
+          )}
+          <Link to={`${base}/calls`} className="menu-row"><span className="ic violet"><Icon name="history" size={20} /></span><span className="t">Call history<small>Every call you've made</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+          <Link to={`${base}/settings`} className="menu-row"><span className="ic green"><Icon name="gear" size={20} /></span><span className="t">Settings & account<small>Notifications, password, privacy</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+        </div>
+
+        <details className="card menu-card">
+          <summary className="menu-row"><span className="ic"><Icon name="edit" size={20} /></span><span className="t">Edit profile<small>Name, city, languages, about you</small></span><Icon name="chevron" size={18} className="chev" /></summary>
+          <form onSubmit={save} className="edit-body">
+            <div className="field"><label htmlFor="n">Name</label><input id="n" className="input" value={f.name} onChange={set('name')} /></div>
+            <div className="field"><label htmlFor="c">City</label><input id="c" className="input" value={f.city} onChange={set('city')} /></div>
+            <div className="field"><label htmlFor="l">Languages (comma separated)</label><input id="l" className="input" value={f.languages} onChange={set('languages')} /></div>
+            <div className="field"><label htmlFor="b">About you</label><textarea id="b" rows={3} className="input" value={f.bio} onChange={set('bio')} maxLength={300} placeholder="A line or two about what you love to talk about" /></div>
+            <button className="btn btn-primary btn-block" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
+          </form>
+        </details>
+        <p className="faint" style={{ textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}><Icon name="shield" size={14} />Your email is never shown to others</p>
       </div>
     </>
   );

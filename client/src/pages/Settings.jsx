@@ -39,7 +39,7 @@ export default function Settings() {
 
   return (
     <>
-      <header className="topbar"><button onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button><h1>Settings</h1></header>
+      <header className="topbar"><button className="icon-btn press" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button><h1>Settings</h1></header>
       <div className="page settings-list">
         <div className="section-title">Notifications</div>
         <button className="card list-row" onClick={togglePush} aria-pressed={push}>
