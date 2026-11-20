@@ -1,0 +1,33 @@
+feature,area,priority,original,clone,notes
+Sign up / login,auth,must,yes,yes,email+password; phone OTP later
+Three roles (user/host/admin),auth,must,yes,yes,
+Discover online hosts,discover,must,yes,yes,
+Language filter,discover,should,yes,yes,
+Host profile page,discover,must,yes,yes,
+1:1 text chat realtime,chat,must,yes,yes,
+Send gifts,chat,should,yes,yes,
+Audio call (WebRTC),calls,must,yes,yes,
+Video call (WebRTC),calls,must,yes,yes,
+Per-minute coin billing,billing,must,yes,yes,
+Low-balance auto end,billing,must,yes,yes,
+Wallet + coin packs,billing,must,yes,yes,Razorpay checkout
+Transaction history,billing,must,partial,yes,differentiator
+Host online/offline/busy presence,host,must,yes,yes,
+Host earnings + payout request,host,must,yes,yes,
+Admin dashboard KPIs,admin,must,yes,yes,
+Admin manage users (block/credit),admin,must,yes,yes,
+Admin approve hosts + set rates,admin,must,yes,yes,
+Admin call log,admin,should,yes,yes,
+Reports / moderation,safety,should,yes,yes,
+Block user,safety,should,yes,yes,
+Profile photo / avatar,profile,could,yes,yes,photo upload + initials fallback
+Live audio rooms / radio,rooms,could,yes,skip,out of scope v1
+Games / quizzes / trainers,engagement,could,yes,skip,out of scope v1
+12 Indian languages UI,i18n,could,yes,skip,content only
+Real payment gateway,billing,should,yes,yes,Razorpay (needs owner keys)
+Push notifications (calls/messages),engagement,should,yes,yes,
+Account deletion,safety,must,yes,yes,Play Store requirement
+18+ age gate,safety,must,yes,yes,
+Password reset,auth,must,yes,yes,Resend
+Legal pages,legal,must,yes,yes,fill brand.js + lawyer review
+Phone OTP login,auth,should,yes,no,needs SMS provider

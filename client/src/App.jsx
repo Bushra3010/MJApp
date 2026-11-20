@@ -1,0 +1,85 @@
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { useAuth } from './lib/auth.jsx';
+import { CallProvider } from './lib/call.jsx';
+import CallOverlay from './components/CallOverlay.jsx';
+import Landing from './pages/Landing.jsx';
+import Login from './pages/Login.jsx';
+import Reset from './pages/Reset.jsx';
+import Legal from './pages/Legal.jsx';
+import Settings from './pages/Settings.jsx';
+import UserShell from './pages/user/UserShell.jsx';
+import Discover from './pages/user/Discover.jsx';
+import HostProfile from './pages/user/HostProfile.jsx';
+import Wallet from './pages/user/Wallet.jsx';
+import Chats from './pages/Chats.jsx';
+import ChatThread from './pages/ChatThread.jsx';
+import Me from './pages/Me.jsx';
+import CallHistory from './pages/CallHistory.jsx';
+import HostShell from './pages/host/HostShell.jsx';
+import HostHome from './pages/host/HostHome.jsx';
+import HostEarnings from './pages/host/HostEarnings.jsx';
+import AdminLayout from './pages/admin/AdminLayout.jsx';
+import AdminDashboard from './pages/admin/AdminDashboard.jsx';
+import AdminUsers from './pages/admin/AdminUsers.jsx';
+import AdminHosts from './pages/admin/AdminHosts.jsx';
+import AdminCalls from './pages/admin/AdminCalls.jsx';
+import AdminReports from './pages/admin/AdminReports.jsx';
+import AdminPayouts from './pages/admin/AdminPayouts.jsx';
+import AdminSettings from './pages/admin/AdminSettings.jsx';
+
+import { homeFor } from './lib/roles.js';
+
+function Guard({ role, children }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (role && user.role !== role) return <Navigate to={homeFor(user.role)} replace />;
+  return children;
+}
+
+export default function App() {
+  const { user, ready } = useAuth();
+  if (!ready) return <div className="spinner" />;
+  return (
+    <CallProvider>
+      <Routes>
+        <Route path="/" element={user ? <Navigate to={homeFor(user.role)} replace /> : <Landing />} />
+        <Route path="/login" element={user ? <Navigate to={homeFor(user.role)} replace /> : <Login />} />
+        <Route path="/reset" element={<Reset />} />
+        {['terms', 'privacy', 'refunds', 'guidelines', 'contact'].map((p) => <Route key={p} path={`/${p}`} element={<Legal />} />)}
+
+        <Route path="/app" element={<Guard role="user"><UserShell /></Guard>}>
+          <Route index element={<Discover />} />
+          <Route path="chats" element={<Chats />} />
+          <Route path="wallet" element={<Wallet />} />
+          <Route path="me" element={<Me />} />
+          <Route path="calls" element={<CallHistory />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+        <Route path="/app/host/:id" element={<Guard role="user"><HostProfile /></Guard>} />
+        <Route path="/app/chat/:id" element={<Guard role="user"><ChatThread /></Guard>} />
+
+        <Route path="/host" element={<Guard role="host"><HostShell /></Guard>}>
+          <Route index element={<HostHome />} />
+          <Route path="chats" element={<Chats />} />
+          <Route path="earnings" element={<HostEarnings />} />
+          <Route path="me" element={<Me />} />
+          <Route path="calls" element={<CallHistory />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
+        <Route path="/host/chat/:id" element={<Guard role="host"><ChatThread /></Guard>} />
+
+        <Route path="/admin" element={<Guard role="admin"><AdminLayout /></Guard>}>
+          <Route index element={<AdminDashboard />} />
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="hosts" element={<AdminHosts />} />
+          <Route path="calls" element={<AdminCalls />} />
+          <Route path="reports" element={<AdminReports />} />
+          <Route path="payouts" element={<AdminPayouts />} />
+          <Route path="settings" element={<AdminSettings />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <CallOverlay />
+    </CallProvider>
+  );
+}
