@@ -60,6 +60,12 @@ Add the domain to Cloudflare (Websites → Add), then Workers → milo-julo → 
 - One real call between two phones on mobile data
 
 ## Updating
+Every push to `main` on GitHub (Bushra3010/MJApp) deploys automatically via Cloudflare Workers Builds:
+- Root directory `/`
+- Build: `npm ci && npm --prefix client ci && npm --prefix worker ci && npm --prefix client run build`
+- Deploy: `cd worker && npx wrangler deploy`
+
+Pushes to other branches don't change the live site. To deploy by hand instead:
 ```bash
 npm run deploy      # from the project root
 ```
