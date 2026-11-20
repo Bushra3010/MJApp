@@ -4,7 +4,7 @@ import { api } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 import { useCall } from '../../lib/call.jsx';
 import { useToast } from '../../lib/toast.jsx';
-import Avatar from '../../components/Avatar.jsx';
+import { initials, warmFor } from '../../components/Avatar.jsx';
 import Icon from '../../components/Icon.jsx';
 import Coins from '../../components/Coins.jsx';
 import ReportSheet from '../../components/ReportSheet.jsx';
@@ -32,39 +32,35 @@ export default function HostProfile() {
 
   return (
     <div className="app-shell">
-      <div className="cover">
-        {h.avatar && <img src={h.avatar} alt="" />}
-        <div className="cover-bar">
-          <button className="icon-btn press" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" /></button>
-          <button className="icon-btn press" onClick={() => setMenu(true)} aria-label="More"><Icon name="more" /></button>
+      <header className="p-head">
+        <button className="circle-btn" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" size={18} /></button>
+        <div style={{ minWidth: 0 }}>
+          <h1>{h.name}<span className="verified" title="Verified host"><Icon name="verified" size={20} /></span></h1>
+          <small>{h.city || 'India'}</small>
         </div>
+        <button className="circle-btn" onClick={() => setMenu(true)} aria-label="More"><Icon name="more" size={18} /></button>
+      </header>
+      <div className="p-photo">
+        {h.avatar ? <img src={h.avatar} alt={h.name} /> : <div className="ini" style={{ background: warmFor(h.name) }}>{initials(h.name)}</div>}
+        <span className={`hero-tag status ${avail ? 'on' : h.busy ? 'busy' : ''}`}><i />{avail ? 'Online now' : h.busy ? 'On a call' : 'Offline'}</span>
       </div>
-      <div className="page">
-        <div className="profile-hero">
-          <Avatar src={h.avatar} name={h.name} size={132} online={!!h.online} busy={!!h.busy} className="ringed" />
-          <h2>{h.name}</h2>
-          <p className="muted" style={{ fontWeight: 700 }}>{[h.city, h.gender && h.gender[0].toUpperCase() + h.gender.slice(1)].filter(Boolean).join(' · ')}</p>
-          <div style={{ marginTop: 10 }}>
-            <span className={`chip ${avail ? 'chip-green' : h.busy ? 'chip-amber' : 'chip-grey'}`}>{avail ? '● Online now' : h.busy ? 'On another call' : 'Offline'}</span>
-          </div>
+      <div className="p-body" style={{ paddingBottom: 130 }}>
+        <div className="p-label">About</div>
+        <p className="p-text">{h.bio || `${h.name} hasn't written a bio yet.`}</p>
+        <div className="p-label">Languages</div>
+        <div className="pills">{h.languages.split(',').map((l) => <span key={l} className="pill2">🗣️ {l}</span>)}</div>
+        <div className="p-label">Rates</div>
+        <div className="pills">
+          <span className="pill2"><Icon name="phone" size={16} /> <Coins value={h.audio_rate} /> /min</span>
+          <span className="pill2"><Icon name="video" size={16} /> <Coins value={h.video_rate} /> /min</span>
+          <span className="pill2">📞 {h.calls} {h.calls === 1 ? 'call' : 'calls'}</span>
         </div>
-        <div className="card stat-group">
-          <div><b>{h.calls}</b><span>Calls</span></div>
-          <div><b>{Math.round(h.seconds / 60)}</b><span>Minutes</span></div>
-          <div><b>{h.languages.split(',').length}</b><span>Languages</span></div>
-        </div>
-        {h.bio && <div className="card" style={{ padding: 16, marginBottom: 14 }}><div className="faint" style={{ fontWeight: 800, marginBottom: 4 }}>About</div><p style={{ lineHeight: 1.5 }}>{h.bio}</p></div>}
-        <div className="lang-chips">{h.languages.split(',').map((l) => <span key={l} className="chip">{l}</span>)}</div>
-        <div className="rate-row">
-          <div className="card rate"><span className="ic"><Icon name="phone" size={20} /></span><b><Coins value={h.audio_rate} /></b><span className="faint">per min · audio</span></div>
-          <div className="card rate"><span className="ic"><Icon name="video" size={20} /></span><b><Coins value={h.video_rate} /></b><span className="faint">per min · video</span></div>
-        </div>
-        <p className="faint" style={{ textAlign: 'center', padding: '0 12px' }}>You're charged per started minute. You'll see the coins spent live during the call.</p>
+        <p className="faint">You're charged per started minute. You'll see the coins spent live during the call.</p>
       </div>
-      <div className="cta-bar">
-        <button className="btn btn-ghost" onClick={() => openChat(nav, h.id, toast)}><Icon name="chat" size={18} />Chat</button>
-        <button className="btn btn-outline" disabled={!avail} onClick={() => call('audio')}><Icon name="phone" size={18} />Audio</button>
-        <button className="btn btn-primary" disabled={!avail} onClick={() => call('video')}><Icon name="video" size={18} />Video</button>
+      <div className="p-actions">
+        <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label="Chat"><Icon name="chat" size={26} fill /></button>
+        <button className="act blue" disabled={!avail} onClick={() => call('audio')} aria-label="Audio call"><Icon name="phone" size={26} fill /></button>
+        <button className="act green" disabled={!avail} onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={27} fill /></button>
       </div>
       {menu && <ReportSheet target={h} onClose={() => setMenu(false)} onBlocked={() => nav('/app')} />}
     </div>

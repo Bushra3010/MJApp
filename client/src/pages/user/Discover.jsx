@@ -4,9 +4,9 @@ import { api } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 import { useCall } from '../../lib/call.jsx';
 import { useToast } from '../../lib/toast.jsx';
-import TopBar from '../../components/TopBar.jsx';
 import Icon from '../../components/Icon.jsx';
-import Avatar, { gradFor, initials } from '../../components/Avatar.jsx';
+import Avatar, { initials, warmFor } from '../../components/Avatar.jsx';
+import Coins from '../../components/Coins.jsx';
 
 const LANGS = ['All', 'Hindi', 'English', 'Tamil', 'Telugu', 'Kannada', 'Marathi', 'Bengali', 'Punjabi'];
 
@@ -30,6 +30,10 @@ export async function openChat(nav, hostId, toast) {
 export default function Discover() {
   const [lang, setLang] = useState('All');
   const [onlyOnline, setOnlyOnline] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [idx, setIdx] = useState(0);
+  const [dx, setDx] = useState(0);
+  const [drag, setDrag] = useState(null);
   const hosts = useHosts(lang === 'All' ? '' : `?lang=${encodeURIComponent(lang)}`);
   const { user } = useAuth();
   const { startCall } = useCall();
@@ -41,68 +45,64 @@ export default function Discover() {
     const sorted = [...hosts].sort((a, b) => (b.online && !b.busy) - (a.online && !a.busy) || b.online - a.online);
     return onlyOnline ? sorted.filter((h) => h.online) : sorted;
   }, [hosts, onlyOnline]);
-  const live = useMemo(() => (hosts || []).filter((h) => h.online && !h.busy), [hosts]);
+  useEffect(() => { setIdx(0); }, [lang, onlyOnline]);
 
-  const call = (e, h, type) => {
-    e.preventDefault();
-    startCall({ id: h.id, name: h.name, avatar: h.avatar }, type).then((r) => { if (r?.code === 'LOW_BALANCE') nav('/app/wallet'); });
+  const n = list?.length || 0;
+  const h = n ? list[idx % n] : null;
+  const avail = !!(h && h.online && !h.busy);
+  const go = (step) => { if (n > 1) { setDx(step * -420); setTimeout(() => { setIdx((i) => (i + step + n) % n); setDx(0); }, 200); } };
+  const call = (type) => startCall({ id: h.id, name: h.name, avatar: h.avatar }, type).then((r) => { if (r?.code === 'LOW_BALANCE') nav('/app/wallet'); });
+
+  const down = (e) => { setDrag({ x: e.clientX, moved: false }); e.currentTarget.setPointerCapture(e.pointerId); };
+  const move = (e) => { if (drag) { const d = e.clientX - drag.x; if (Math.abs(d) > 6) drag.moved = true; setDx(d); } };
+  const up = () => {
+    if (!drag) return;
+    const moved = drag.moved; setDrag(null);
+    if (dx < -90) go(1); else if (dx > 90) go(-1); else { setDx(0); if (!moved) nav(`/app/host/${h.id}`); }
   };
-  const first = (user?.name || '').split(' ')[0];
 
   return (
     <>
-      <TopBar title="Milo Julo" />
-      <div className="page">
-        <div className="hello">
-          <h2>Hi {first} 👋</h2>
-          <p>Who would you like to talk to today?</p>
+      <header className="d-head">
+        <Link to="/app/me"><Avatar src={user?.avatar} name={user?.name} size={42} /></Link>
+        <div style={{ minWidth: 0 }}>
+          <div className="hi">Hello {(user?.name || '').split(' ')[0]}!</div>
+          <div className="loc"><Icon name="pin" size={14} />{user?.city || 'India'}</div>
         </div>
-
-        {live.length > 0 && (<>
-          <div className="section-head"><h3>Online now</h3><span>{live.length} available</span></div>
-          <div className="stories">
-            {live.map((h) => (
-              <Link key={h.id} to={`/app/host/${h.id}`} className="story">
-                <div className="ring"><div><Avatar src={h.avatar} name={h.name} size={62} /></div></div>
-                <span>{h.name}</span>
-              </Link>
-            ))}
-          </div>
-        </>)}
-
-        <div className="section-head"><h3>Discover</h3>{list && <span>{list.length} {list.length === 1 ? 'person' : 'people'}</span>}</div>
-        <div className="filters">
-          <button className={onlyOnline ? 'on' : ''} onClick={() => setOnlyOnline(!onlyOnline)} aria-pressed={onlyOnline}><i className="live-dot" />Online</button>
-          {LANGS.map((l) => <button key={l} className={lang === l ? 'on' : ''} onClick={() => setLang(l)} aria-pressed={lang === l}>{l}</button>)}
-        </div>
-        {!list ? (
-          <div className="host-grid">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton skel-card" />)}</div>
-        ) : list.length === 0 ? (
-          <div className="empty"><div className="big">🌙</div><b>No one here right now</b><p>Try another language or check back soon — hosts come online all day.</p></div>
-        ) : (
-          <div className="host-grid">
-            {list.map((h, i) => {
-              const avail = h.online && !h.busy;
-              return (
-                <Link key={h.id} to={`/app/host/${h.id}`} className="host-card rise" style={{ '--i': i }}>
-                  <div className="photo">
-                    {h.avatar ? <img src={h.avatar} alt="" loading="lazy" /> : <div className="initials-big" style={{ background: gradFor(h.name) }}>{initials(h.name)}</div>}
-                    <span className={`status-pill ${avail ? 'on' : h.busy ? 'busy' : ''}`}><i />{avail ? 'Online' : h.busy ? 'On a call' : 'Offline'}</span>
-                    <div className="overlay">
-                      <div className="name-row"><span className="name">{h.name}</span>{h.video_rate > 0 && <span className="rate-tag coin">{h.video_rate}</span>}</div>
-                      <div className="meta">{[h.city, h.languages.split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · ')}</div>
-                    </div>
-                  </div>
-                  <div className="actions">
-                    <button className="mini-btn" aria-label={`Chat with ${h.name}`} onClick={(e) => { e.preventDefault(); openChat(nav, h.id, toast); }}><Icon name="chat" size={19} /></button>
-                    <button className="mini-btn" disabled={!avail} aria-label={`Audio call ${h.name}`} onClick={(e) => call(e, h, 'audio')}><Icon name="phone" size={19} /></button>
-                    <button className="mini-btn video" disabled={!avail} aria-label={`Video call ${h.name}`} onClick={(e) => call(e, h, 'video')}><Icon name="video" size={20} /></button>
-                  </div>
-                </Link>
-              );
-            })}
+        <div className="spacer" />
+        <Link to="/app/wallet" className="coin-pill press" style={{ background: 'transparent', borderColor: '#4a4a4c', boxShadow: 'none', paddingRight: 12 }} aria-label={`Wallet: ${user?.coins} coins`}><Coins value={user?.coins} /></Link>
+        <button className="circle-btn" onClick={() => setShowFilters((v) => !v)} aria-label="Filters" aria-expanded={showFilters}><Icon name="search" size={19} /></button>
+      </header>
+      <div className="d-wrap">
+        {showFilters && (
+          <div className="filters d-filters rise">
+            <button className={onlyOnline ? 'on' : ''} onClick={() => setOnlyOnline(!onlyOnline)} aria-pressed={onlyOnline}><i className="live-dot" />Online</button>
+            {LANGS.map((l) => <button key={l} className={lang === l ? 'on' : ''} onClick={() => setLang(l)} aria-pressed={lang === l}>{l}</button>)}
           </div>
         )}
+        {!list ? <div className="skeleton hero-card" /> : !h ? (
+          <div className="empty"><div className="big">🌙</div><b>No one here right now</b><p>Try another language or check back soon — hosts come online all day.</p></div>
+        ) : (<>
+          <div className={`hero-card ${drag ? '' : 'anim'}`} role="link" tabIndex={0} aria-label={`Open ${h.name}'s profile`}
+            onKeyDown={(e) => { if (e.key === 'Enter') nav(`/app/host/${h.id}`); if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1); }}
+            style={{ transform: `translateX(${dx}px) rotate(${dx / 28}deg)`, opacity: 1 - Math.min(Math.abs(dx) / 700, 0.4) }}
+            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { setDrag(null); setDx(0); }}>
+            <div className="ph">{h.avatar ? <img src={h.avatar} alt="" draggable="false" /> : <div className="ini" style={{ background: warmFor(h.name) }}>{initials(h.name)}</div>}</div>
+            <span className={`tag ${avail ? 'on' : h.busy ? 'busy' : ''}`}><i />{avail ? 'Online now' : h.busy ? 'On a call' : 'Offline'}</span>
+            <span className="rate-chip coin">{h.video_rate}/min</span>
+            {n > 1 && <div className="prog"><span style={{ top: `${(idx % n) * (100 / n)}%`, height: `${100 / n}%` }} /></div>}
+            <div className="info">
+              <h2>{h.name}{avail && <span className="live" />}</h2>
+              <p>{[h.city, h.languages.split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · ')}</p>
+            </div>
+          </div>
+          <div className="act-row">
+            <button className="act red" onClick={() => go(1)} aria-label="Next person" disabled={n < 2}><Icon name="x" size={28} strokeWidth="2.6" /></button>
+            <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label={`Chat with ${h.name}`}><Icon name="chat" size={26} fill /></button>
+            <button className="act green" onClick={() => call('video')} disabled={!avail} aria-label={`Video call ${h.name}`}><Icon name="video" size={27} fill /></button>
+          </div>
+          <p className="swipe-hint">Swipe to see more · tap the card for profile</p>
+        </>)}
       </div>
     </>
   );
