@@ -15,7 +15,7 @@ export default function AdminPayouts() {
     <>
       <h1>Payouts</h1>
       {!rows ? <div className="spinner" /> : (
-        <div className="card table-wrap"><table className="t">
+        <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
           <thead><tr><th>Requested</th><th>Host</th><th>Coins</th><th>Amount</th><th>UPI</th><th>Status</th><th /></tr></thead>
           <tbody>{rows.map((p) => (
             <tr key={p.id}>

@@ -33,7 +33,7 @@ export default function Settings() {
   };
   const del = async (e) => {
     e.preventDefault(); setBusy(true);
-    try { await api('/me', { method: 'DELETE', body: user.has_password ? { password: delPw } : { confirm: delPw } }); endSession(); nav('/', { replace: true }); toast('Your account has been deleted'); }
+    try { await api('/me', { method: 'DELETE', body: user.has_password ? { password: delPw } : { confirm: delPw } }); endSession(); window.location.replace('/'); }
     catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 

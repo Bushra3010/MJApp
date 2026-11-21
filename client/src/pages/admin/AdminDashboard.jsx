@@ -29,7 +29,7 @@ export default function AdminDashboard() {
           <tbody>{s.live.map((c) => <tr key={c.id}><td>{c.userName}</td><td>{c.hostName}</td><td>{c.type}</td><td><span className="chip chip-green">{c.status}</span></td><td>{c.charged}</td></tr>)}</tbody></table></div>
       </>}
       <h2 className="section-title">Recent calls</h2>
-      <div className="card table-wrap"><table className="t"><thead><tr><th>When</th><th>User</th><th>Host</th><th>Type</th><th>Status</th><th>Duration</th><th>Coins</th></tr></thead>
+      <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t"><thead><tr><th>When</th><th>User</th><th>Host</th><th>Type</th><th>Status</th><th>Duration</th><th>Coins</th></tr></thead>
         <tbody>{s.recentCalls.map((c) => <tr key={c.id}><td>{timeAgo(c.created_at)}</td><td>{c.user_name}</td><td>{c.host_name}</td><td>{c.type}</td><td>{c.status}</td><td>{mmss(c.seconds)}</td><td>{c.coins_charged}</td></tr>)}
           {s.recentCalls.length === 0 && <tr><td colSpan={7} className="faint">No calls yet</td></tr>}</tbody></table></div>
     </>

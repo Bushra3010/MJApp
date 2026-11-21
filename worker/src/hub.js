@@ -39,8 +39,13 @@ export class Hub extends DurableObject {
   // ---------- helpers shared with routes ----------
   setting(key) { return Number(this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? 0); }
 
+  /** Credit the host's share of coins spent on them. Fractions of a coin carry over, so 1-coin messages still pay. */
   creditHost(hostId, coinsSpent, note, ref) {
-    const earned = Math.floor((coinsSpent * this.setting('host_share_pct')) / 100);
+    const hp = this.db.prepare('SELECT earn_remainder FROM host_profiles WHERE user_id = ?').get(hostId);
+    if (!hp) return 0;
+    const total = coinsSpent * this.setting('host_share_pct') + (hp.earn_remainder || 0);
+    const earned = Math.floor(total / 100);
+    this.db.prepare('UPDATE host_profiles SET earn_remainder = ? WHERE user_id = ?').run(total % 100, hostId);
     if (earned <= 0) return 0;
     this.db.prepare('UPDATE host_profiles SET earnings = earnings + ?, total_earned = total_earned + ? WHERE user_id = ?').run(earned, earned, hostId);
     const bal = this.db.prepare('SELECT earnings FROM host_profiles WHERE user_id = ?').get(hostId)?.earnings ?? 0;
@@ -273,7 +278,7 @@ export class Hub extends DurableObject {
       this.endCall(c.id, 'balance');
       return false;
     }
-    this.creditHost(c.host_id, c.rate, `${c.type} call minute`, `call:${c.id}`);
+    this.creditHost(c.host_id, c.rate, `${c.type === 'video' ? 'Video' : 'Audio'} call minute`, `call:${c.id}`);
     const minutes = c.minutes + 1;
     const charged = c.charged + c.rate;
     this.db.prepare('UPDATE live_calls SET minutes = ?, charged = ? WHERE id = ?').run(minutes, charged, c.id);

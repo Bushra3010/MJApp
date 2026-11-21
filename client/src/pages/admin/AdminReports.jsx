@@ -21,7 +21,7 @@ export default function AdminReports() {
     <>
       <h1>Reports</h1>
       {!rows ? <div className="spinner" /> : (
-        <div className="card table-wrap"><table className="t">
+        <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
           <thead><tr><th>When</th><th>Reporter</th><th>Reported</th><th>Reason</th><th>Status</th><th /></tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={r.id}>

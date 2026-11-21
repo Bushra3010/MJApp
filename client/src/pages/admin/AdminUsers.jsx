@@ -27,7 +27,7 @@ export default function AdminUsers() {
     <>
       <div className="admin-top"><h1>Users</h1><div className="spacer" /><input className="input" style={{ maxWidth: 280 }} placeholder="Search name or email" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {!rows ? <div className="spinner" /> : (
-        <div className="card table-wrap"><table className="t">
+        <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
           <thead><tr><th>User</th><th>Email</th><th>Coins</th><th>Joined</th><th>Status</th><th /></tr></thead>
           <tbody>{rows.map((u) => (
             <tr key={u.id}>

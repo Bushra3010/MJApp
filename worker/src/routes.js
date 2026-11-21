@@ -67,9 +67,9 @@ export function buildApi(h) {
 
   // ================= auth & account =================
   const registerSchema = z.object({
-    name: z.string().trim().min(2, 'Enter your name').max(40),
-    email: z.string().trim().toLowerCase().email('Enter a valid email').max(120),
-    password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+    name: z.string().trim().min(2, 'Enter your name').max(40, 'Name can be up to 40 characters'),
+    email: z.string().trim().toLowerCase().email('Enter a valid email').max(120, 'Email is too long'),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(100, 'Password can be up to 100 characters'),
     gender: z.enum(['', 'female', 'male', 'other']).default(''),
     languages: z.string().regex(LANG_RE).default('Hindi,English'),
     birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter your date of birth'),
@@ -212,10 +212,10 @@ export function buildApi(h) {
 
   app.patch('/me', auth(), R(async (c) => {
     const f = parse(z.object({
-      name: z.string().trim().min(2).max(40).optional(),
-      bio: z.string().max(300).optional(),
+      name: z.string().trim().min(2, 'Name must be at least 2 characters').max(40, 'Name can be up to 40 characters').optional(),
+      bio: z.string().max(300, 'About you can be up to 300 characters').optional(),
       gender: z.enum(['', 'female', 'male', 'other']).optional(),
-      city: z.string().max(60).optional(),
+      city: z.string().max(60, 'City can be up to 60 characters').optional(),
       languages: z.string().regex(LANG_RE, 'Languages: letters and commas only').optional(),
     }), await body(c));
     const u = c.get('user');
@@ -581,7 +581,7 @@ export function buildApi(h) {
     const f = parse(z.object({
       name: z.string().trim().min(2, 'Enter a name').max(40),
       email: z.string().trim().toLowerCase().email('Enter a valid email'),
-      password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+      password: z.string().min(8, 'Password must be at least 8 characters').max(100, 'Password can be up to 100 characters'),
       gender: z.enum(['female', 'male', 'other']).default('female'),
       languages: z.string().regex(LANG_RE).default('Hindi,English'),
       city: z.string().max(60).default(''),

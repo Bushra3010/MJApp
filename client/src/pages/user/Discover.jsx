@@ -64,7 +64,7 @@ export default function Discover() {
   return (
     <>
       <header className="d-head">
-        <Link to="/app/me"><Avatar src={user?.avatar} name={user?.name} size={42} /></Link>
+        <Link to="/app/me" aria-label="Your profile"><Avatar src={user?.avatar} name={user?.name} size={42} /></Link>
         <div style={{ minWidth: 0 }}>
           <div className="hi">Hello {(user?.name || '').split(' ')[0]}!</div>
           <div className="loc"><Icon name="pin" size={14} />{user?.city || 'India'}</div>

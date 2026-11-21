@@ -103,8 +103,8 @@ export default function Login() {
           <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 14 }}>{COPY.admin[mode]}</h2>
         ) : (
           <div className="tabs" role="tablist">
-            <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>Log in</button>
-            <button type="button" className={mode === 'signup' ? 'on' : ''} onClick={() => setMode('signup')}>{APP === 'host' ? 'Become a host' : 'Sign up'}</button>
+            <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>Log in</button>
+            <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => setMode('signup')}>{APP === 'host' ? 'Become a host' : 'Sign up'}</button>
           </div>
         )}
         {mode === 'signup' && APP === 'host' && <p className="muted" style={{ marginBottom: 14, fontSize: 14 }}>Talk to people in your language and earn for every minute. Your profile goes live after our team approves it.</p>}

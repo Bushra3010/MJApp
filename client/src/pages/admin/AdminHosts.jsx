@@ -27,7 +27,7 @@ export default function AdminHosts() {
     <>
       <div className="admin-top"><h1>Hosts</h1><div className="spacer" /><button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add host</button></div>
       {!rows ? <div className="spinner" /> : (
-        <div className="card table-wrap"><table className="t">
+        <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
           <thead><tr><th>Host</th><th>Status</th><th>Audio /min</th><th>Video /min</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
           <tbody>{rows.map((h) => (
             <tr key={h.id}>

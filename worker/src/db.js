@@ -162,6 +162,8 @@ const SCHEMA = [
   // v3 — Google sign-in runs through Supabase Auth; link accounts by Supabase user id
   `ALTER TABLE users ADD COLUMN supabase_id TEXT;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users(supabase_id);`,
+  // v4 — keep the fraction of a coin a host has earned but not yet been credited (in coin × percent units)
+  `ALTER TABLE host_profiles ADD COLUMN earn_remainder INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 export const DEFAULT_SETTINGS = {

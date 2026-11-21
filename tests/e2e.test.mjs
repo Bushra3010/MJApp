@@ -146,7 +146,7 @@ try {
   assert.equal(sum.status, 'ended'); assert.equal(sum.charged, 75);
   const w = (await req('/wallet', {}, U)).body;
   assert.equal(w.coins, 425); ok('billed 3 started minutes = 75 coins (Durable Object alarms)');
-  assert.equal((await req('/host/stats', {}, H)).body.profile.earnings, 36); ok('host earned 50% of each minute');
+  assert.equal((await req('/host/stats', {}, H)).body.profile.earnings, 37); ok('host earned 50% of each minute, half-coins carried over (12 + 13 + 12)');
 
   await req(`/admin/users/${U.user.id}/credit`, { method: 'POST', body: { amount: -(w.coins - 30) } }, A);
   inc = hs.once('call:incoming');
@@ -167,9 +167,12 @@ try {
 
   // ---------- chat ----------
   const conv = (await req('/conversations', { method: 'POST', body: { hostId: H.user.id } }, U)).body;
+  const earnedBeforeChat = (await req('/host/stats', {}, H)).body.profile.earnings;
   const newMsg = hs.once('message:new');
   assert.equal((await req(`/conversations/${conv.id}/messages`, { method: 'POST', body: { body: 'hi' } }, U)).status, 200);
   assert.equal((await newMsg).body, 'hi'); ok('chat delivered realtime');
+  assert.equal((await req(`/conversations/${conv.id}/messages`, { method: 'POST', body: { body: 'second message' } }, U)).status, 200);
+  assert.equal((await req('/host/stats', {}, H)).body.profile.earnings - earnedBeforeChat, 1); ok('host earns from chat: two 1-coin messages pay the host 1 coin');
   assert.equal((await req(`/conversations/${conv.id}/gift`, { method: 'POST', body: { giftId: 3 } }, U)).status, 402); ok('gift refused without coins');
   assert.equal((await req(`/conversations/${conv.id}/messages`, { method: 'POST', body: { body: 'hello!' } }, H)).status, 200); ok('host replies free');
   assert.equal((await req(`/conversations/${conv.id}/messages`, {}, U2)).status, 404); ok("other users can't read a conversation");
@@ -180,15 +183,15 @@ try {
   let v = await req('/wallet/verify', { method: 'POST', body: { razorpay_order_id: order.orderId, razorpay_payment_id: 'pay_1', razorpay_signature: 'forged' } }, U);
   assert.equal(v.status, 400); ok('forged checkout signature rejected');
   v = await req('/wallet/verify', { method: 'POST', body: { razorpay_order_id: order.orderId, razorpay_payment_id: 'pay_1', razorpay_signature: hmac(RZP.secret, `${order.orderId}|pay_1`) } }, U);
-  assert.equal(v.body.coins, 254); ok('verified payment credits 250 coins');
+  assert.equal(v.body.coins, 253); ok('verified payment credits 250 coins');
   const wb = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: 'pay_1', order_id: order.orderId } } } });
   assert.equal((await req('/webhooks/razorpay', { method: 'POST', raw: wb, headers: { 'x-razorpay-signature': 'nope' } })).status, 400); ok('webhook with bad signature rejected');
   for (let i = 0; i < 2; i++) await req('/webhooks/razorpay', { method: 'POST', raw: wb, headers: { 'x-razorpay-signature': hmac(RZP.wh, wb), 'x-razorpay-event-id': 'evt_1' } });
-  assert.equal((await req('/wallet', {}, U)).body.coins, 254); ok('webhook + browser callback + retry credit exactly once');
+  assert.equal((await req('/wallet', {}, U)).body.coins, 253); ok('webhook + browser callback + retry credit exactly once');
   const order2 = (await req('/wallet/order', { method: 'POST', body: { packId: 'p1' } }, U)).body;
   const wb2 = JSON.stringify({ event: 'order.paid', payload: { payment: { entity: { id: 'pay_2', order_id: order2.orderId } } } });
   await req('/webhooks/razorpay', { method: 'POST', raw: wb2, headers: { 'x-razorpay-signature': hmac(RZP.wh, wb2), 'x-razorpay-event-id': 'evt_2' } });
-  assert.equal((await req('/wallet', {}, U)).body.coins, 354); ok('webhook alone credits when the browser closed early');
+  assert.equal((await req('/wallet', {}, U)).body.coins, 353); ok('webhook alone credits when the browser closed early');
   assert.equal((await req('/wallet/verify', { method: 'POST', body: { razorpay_order_id: order.orderId, razorpay_payment_id: 'pay_1', razorpay_signature: hmac(RZP.secret, `${order.orderId}|pay_1`) } }, U2)).status, 404); ok("can't claim someone else's order");
 
   // ---------- TURN ----------

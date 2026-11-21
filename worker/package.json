@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8787",
+    "dev": "mkdir -p ../client/dist/user && wrangler dev --port 8787",
     "deploy": "npm --prefix ../client run build && wrangler deploy && wrangler deploy -c apps/host/wrangler.toml && wrangler deploy -c apps/admin/wrangler.toml"
   },
   "dependencies": {

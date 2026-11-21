@@ -7,9 +7,12 @@
     "dev": "concurrently -n api,friends,host,admin -c magenta,cyan,yellow,green \"npm --prefix worker run dev\" \"npm --prefix client run dev\" \"npm --prefix client run dev:host\" \"npm --prefix client run dev:admin\"",
     "build": "npm --prefix client run build",
     "deploy": "npm --prefix worker run deploy",
-    "test": "node tests/e2e.test.mjs"
+    "test": "node tests/e2e.test.mjs",
+    "e2e": "playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.65.1",
     "concurrently": "^9.2.5",
     "ws": "^8.23.0"
   }
