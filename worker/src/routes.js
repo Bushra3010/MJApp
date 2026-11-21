@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { COIN_PACKS, publicUser } from './db.js';
 import { hashPassword, verifyPassword, signJwt, randomToken, randomHex, sha256Hex } from './crypto.js';
 import { vapidKeys } from './push.js';
-import { verifyGoogleIdToken } from './google.js';
+import { verifySupabaseGoogle, supabaseGoogleEnabled } from './supabase.js';
 import {
   razorpayEnabled, createRazorpayOrder, verifyCheckoutSignature, verifyWebhookSignature, sendEmail, iceServersFor,
 } from './services.js';
@@ -115,26 +115,26 @@ export function buildApi(h) {
     return { user: h.me(u), token };
   }));
 
-  // Sign in / sign up with Google. New people get { needsProfile } first, then send the same credential again
-  // with date of birth, languages and terms (Google doesn't give us those, and the 18+ rule still applies).
+  // Sign in / sign up with Google via Supabase Auth. The app sends the Supabase access token; new people get
+  // { needsProfile } first, then send it again with date of birth, languages and terms (the 18+ rule still applies).
   app.post('/auth/google', limit('auth', 30, 15), R(async (c) => {
     const b = parse(z.object({
-      credential: z.string().min(20).max(5000),
+      accessToken: z.string().min(20).max(8000),
       birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       gender: z.enum(['', 'female', 'male', 'other']).default(''),
       languages: z.string().regex(LANG_RE).default('Hindi,English'),
       acceptTerms: z.boolean().optional(),
     }), await body(c));
-    const g = await verifyGoogleIdToken(b.credential, env);
+    const g = await verifySupabaseGoogle(b.accessToken, env);
     const app = appOf(c.req.raw);
 
-    let u = db.prepare('SELECT * FROM users WHERE google_sub = ?').get(g.sub);
+    let u = db.prepare('SELECT * FROM users WHERE supabase_id = ?').get(g.id);
     if (!u) {
       // Same verified email already registered with a password: link Google to that account.
       u = db.prepare('SELECT * FROM users WHERE email = ?').get(g.email);
       if (u) {
-        if (u.google_sub && u.google_sub !== g.sub) throw bad('This email is linked to a different Google account.', 409);
-        db.prepare('UPDATE users SET google_sub = ? WHERE id = ?').run(g.sub, u.id);
+        if (u.supabase_id && u.supabase_id !== g.id) throw bad('This email is linked to a different Google account.', 409);
+        db.prepare('UPDATE users SET supabase_id = ? WHERE id = ?').run(g.id, u.id);
         u = fresh(u.id);
       }
     }
@@ -154,8 +154,8 @@ export function buildApi(h) {
     if (!b.birthDate || b.acceptTerms !== true) return { needsProfile: true, name: g.name, email: g.email };
     if (Number.isNaN(Date.parse(b.birthDate)) || age(b.birthDate) < 18) throw bad('You must be 18 or older to use Milo Julo');
     const name = ((g.name || '').trim().length >= 2 ? g.name.trim() : g.email.split('@')[0]).slice(0, 40);
-    const id = db.prepare("INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date, google_sub) VALUES (?,?,?,'',?,?,?,?)")
-      .run(app, name, g.email, b.gender, b.languages, b.birthDate, g.sub).lastInsertRowid;
+    const id = db.prepare("INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date, supabase_id) VALUES (?,?,?,'',?,?,?,?)")
+      .run(app, name, g.email, b.gender, b.languages, b.birthDate, g.id).lastInsertRowid;
     if (app === 'host') db.prepare('INSERT INTO host_profiles (user_id, audio_rate, video_rate) VALUES (?,?,?)').run(id, h.setting('default_audio_rate'), h.setting('default_video_rate'));
     if (app === 'user' && h.setting('signup_bonus') > 0) h.moveCoins(id, h.setting('signup_bonus'), 'bonus', 'Welcome bonus');
     const nu = fresh(id);
@@ -278,11 +278,11 @@ export function buildApi(h) {
   // ================= config / ice =================
   const testPaymentsAllowed = () => !razorpayEnabled(env) && env.ALLOW_TEST_PAYMENTS === 'true';
   app.get('/ice', auth(), R(async (c) => ({ iceServers: await iceServersFor(env, c.get('user').id) })));
-  app.get('/config', R(() => ({
+  app.get('/config', R(async () => ({
     chatCost: h.setting('chat_cost'),
     packs: COIN_PACKS,
     payments: razorpayEnabled(env) ? 'razorpay' : testPaymentsAllowed() ? 'test' : 'off',
-    googleClientId: env.GOOGLE_CLIENT_ID || null,
+    supabase: (await supabaseGoogleEnabled(env)) ? { url: env.SUPABASE_URL, key: env.SUPABASE_PUBLISHABLE_KEY } : null,
   })));
 
   // ================= discover =================

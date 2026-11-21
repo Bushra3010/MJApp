@@ -25,25 +25,27 @@ const rzp = http.createServer((req, res) => {
   });
 }).listen(4555);
 
-// --- mock Google signing keys (JWKS) + helper to mint ID tokens like Google does ---
-const GOOGLE_AUD = 'test-client.apps.googleusercontent.com';
-const gKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-const evilKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-const gJwk = { ...gKey.publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'RS256', use: 'sig' };
-const jwks = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'max-age=60' }).end(JSON.stringify({ keys: [gJwk] }))).listen(4556);
+// --- mock Supabase Auth signing keys (JWKS) + helper to mint access tokens like Supabase does after Google login ---
+const SB_URL = 'https://test-project.supabase.co';
+const gKey = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+const evilKey = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+const gJwk = { ...gKey.publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'ES256', use: 'sig', key_ops: ['verify'] };
+const jwks = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ keys: [gJwk] }))).listen(4556);
 function googleToken(claims = {}, { key = gKey.privateKey, kid = 'k1' } = {}) {
   const now = Math.floor(Date.now() / 1000);
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const head = enc({ alg: 'RS256', kid, typ: 'JWT' });
-  const body = enc({ iss: 'https://accounts.google.com', aud: GOOGLE_AUD, sub: 'g-' + Math.random().toString(36).slice(2), email: `g${Date.now()}${Math.random()}@gmail.com`, email_verified: true, name: 'Google Person', iat: now, exp: now + 3600, ...claims });
-  const sig = crypto.sign('RSA-SHA256', Buffer.from(`${head}.${body}`), key).toString('base64url');
+  const { email_verified = true, name = 'Google Person', provider = 'google', ...rest } = claims;
+  const head = enc({ alg: 'ES256', kid, typ: 'JWT' });
+  const body = enc({ iss: `${SB_URL}/auth/v1`, aud: 'authenticated', role: 'authenticated', sub: crypto.randomUUID(), email: `g${Date.now()}${Math.random()}@gmail.com`,
+    app_metadata: { provider, providers: [provider] }, user_metadata: { full_name: name, email_verified }, iat: now, exp: now + 3600, ...rest });
+  const sig = crypto.sign('sha256', Buffer.from(`${head}.${body}`), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url');
   return `${head}.${body}.${sig}`;
 }
 
 const vars = {
   JWT_SECRET: 'test-secret-0123456789abcdef0123456789abcdef', ADMIN_EMAILS: 'boss@test.io', ALLOW_DEMO_SEED: 'true', DEMO_PASSWORD: DEMO,
   BILLING_PERIOD_MS: '1000', DISABLE_RATE_LIMIT: 'true', RAZORPAY_KEY_ID: RZP.key, RAZORPAY_KEY_SECRET: RZP.secret,
-  RAZORPAY_WEBHOOK_SECRET: RZP.wh, TRUST_APP_HEADER: 'true', GOOGLE_CLIENT_ID: GOOGLE_AUD, GOOGLE_CERTS_URL: 'http://localhost:4556/certs', RAZORPAY_API_BASE: 'http://localhost:4555', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'turnsecret',
+  RAZORPAY_WEBHOOK_SECRET: RZP.wh, TRUST_APP_HEADER: 'true', SUPABASE_URL: SB_URL, SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test', SUPABASE_JWKS_URL: 'http://localhost:4556/jwks', RAZORPAY_API_BASE: 'http://localhost:4555', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'turnsecret',
 };
 const args = ['wrangler', 'dev', '--port', String(PORT), '--persist-to', mkdtempSync(path.join(tmpdir(), 'mjw-')), '--log-level', 'log',
   ...Object.entries(vars).flatMap(([k, v]) => ['--var', `${k}:${v}`])];
@@ -226,41 +228,42 @@ try {
   assert.equal((await req('/me/avatar', { method: 'POST', form: fd }, U)).status, 400); ok('non-image upload rejected');
   assert.equal((await req('/me', { method: 'PATCH', body: { languages: '<img onerror=x>' } }, U)).status, 400); ok('profile input validated');
 
-  // ---------- Sign in with Google ----------
+  // ---------- Sign in with Google (via Supabase Auth) ----------
   const gpost = (app, body) => req('/auth/google', { method: 'POST', app, body });
-  assert.equal((await req('/config')).body.googleClientId, GOOGLE_AUD); ok('Google client ID published to the apps');
+  assert.equal((await req('/config')).body.supabase?.url, SB_URL); ok('Supabase project published to the apps for Google sign-in');
   const gSub = 'g-new-member', gEmail = `newbie${Date.now()}@gmail.com`;
-  let g = await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail, name: 'Neha Sharma' }) });
+  let g = await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail, name: 'Neha Sharma' }) });
   assert.equal(g.body.needsProfile, true); assert.equal(g.body.email, gEmail); ok('new Google user is asked for date of birth and terms first');
-  g = await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail }), birthDate: '2011-01-01', acceptTerms: true });
+  g = await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail }), birthDate: '2011-01-01', acceptTerms: true });
   assert.match(g.body.error, /18/); ok('Google sign-up still enforces 18+');
-  g = await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail, name: 'Neha Sharma' }), birthDate: '1998-04-04', acceptTerms: true, languages: 'Hindi' });
+  g = await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail, name: 'Neha Sharma' }), birthDate: '1998-04-04', acceptTerms: true, languages: 'Hindi' });
   assert.equal(g.status, 200); assert.equal(g.body.user.role, 'user'); assert.equal(g.body.user.coins, 50); assert.equal(g.body.user.name, 'Neha Sharma');
   assert.equal(g.body.user.has_password, false); assert.equal(g.body.user.google_linked, true); ok('Google sign-up on friends app creates a member with welcome coins');
   const G = { token: g.body.token, app: 'user' };
-  g = await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail }) });
+  g = await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail }) });
   assert.equal(g.body.user?.email, gEmail); ok('returning Google user signs straight in');
-  g = await gpost('host', { credential: googleToken({ sub: gSub, email: gEmail }) });
+  g = await gpost('host', { accessToken: googleToken({ sub: gSub, email: gEmail }) });
   assert.equal(g.body.code, 'WRONG_APP'); ok('Google member account is refused on the host app');
-  g = await gpost('host', { credential: googleToken({ sub: 'g-new-host' }), birthDate: '1995-01-01', acceptTerms: true });
+  g = await gpost('host', { accessToken: googleToken({ sub: 'g-new-host' }), birthDate: '1995-01-01', acceptTerms: true });
   assert.equal(g.body.user.role, 'host'); assert.equal(g.body.user.host.approved, 0); ok('Google sign-up on host app creates a host awaiting approval');
-  assert.equal((await gpost('admin', { credential: googleToken({ sub: 'g-x' }), birthDate: '1990-01-01', acceptTerms: true })).status, 403); ok('Google sign-up on admin app refused for non-admin emails');
-  g = await gpost('admin', { credential: googleToken({ sub: 'g-boss', email: 'boss@test.io' }) });
+  assert.equal((await gpost('admin', { accessToken: googleToken({ sub: 'g-x' }), birthDate: '1990-01-01', acceptTerms: true })).status, 403); ok('Google sign-up on admin app refused for non-admin emails');
+  g = await gpost('admin', { accessToken: googleToken({ sub: 'g-boss', email: 'boss@test.io' }) });
   assert.equal(g.body.user?.role, 'admin'); ok('admin can link Google and sign in to the admin app');
-  g = await gpost('user', { credential: googleToken({ sub: 'g-rahul', email: 'rahul@milojulo.app' }) });
+  g = await gpost('user', { accessToken: googleToken({ sub: 'g-rahul', email: 'rahul@milojulo.app' }) });
   assert.equal(g.body.user?.id, U.user.id); assert.equal(g.body.user.google_linked, true); ok('existing email/password account is linked on first Google sign-in');
-  assert.equal((await gpost('user', { credential: googleToken({ sub: 'g-other', email: 'rahul@milojulo.app' }) })).status, 409); ok('a second Google account cannot take over an already linked email');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: 'g-other', email: 'rahul@milojulo.app' }) })).status, 409); ok('a second Google account cannot take over an already linked email');
   // forged / invalid tokens
-  assert.equal((await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail }, { key: evilKey.privateKey }) })).status, 401); ok('token signed by someone other than Google is rejected');
-  assert.equal((await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail, aud: 'someone-elses-app' }) })).status, 401); ok('token issued for another app is rejected');
-  assert.equal((await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail, exp: Math.floor(Date.now() / 1000) - 600 }) })).status, 401); ok('expired token is rejected');
-  assert.equal((await gpost('user', { credential: googleToken({ sub: 'g-unv', email_verified: false }) })).status, 401); ok('unverified Google email is rejected');
-  assert.equal((await gpost('user', { credential: googleToken({ sub: gSub, email: gEmail, iss: 'https://evil.example' }) })).status, 401); ok('wrong issuer is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail }, { key: evilKey.privateKey }) })).status, 401); ok('token not signed by the Supabase project is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail, aud: 'anon' }) })).status, 401); ok('token with the wrong audience is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail, exp: Math.floor(Date.now() / 1000) - 600 }) })).status, 401); ok('expired token is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: 'g-unv', email_verified: false }) })).status, 401); ok('unverified Google email is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: gSub, email: gEmail, iss: 'https://other-project.supabase.co/auth/v1' }) })).status, 401); ok('token from another Supabase project is rejected');
+  assert.equal((await gpost('user', { accessToken: googleToken({ sub: 'sb-email-only', provider: 'email' }) })).status, 401); ok('Supabase sessions not from Google are rejected');
   // Google-only accounts
   assert.match((await req('/auth/login', { method: 'POST', body: { email: gEmail, password: '' } })).body.error, /Google/); ok('password login on a Google-only account explains to use Google');
   assert.equal((await req('/me/password', { method: 'POST', body: { password: 'neha-pass-123' } }, G)).status, 200);
   assert.ok((await login(gEmail, 'neha-pass-123', 'user')).user); ok('Google-only user can set a password and then log in with email');
-  const G2 = (await gpost('user', { credential: googleToken({ sub: 'g-del' }), birthDate: '1990-01-01', acceptTerms: true })).body;
+  const G2 = (await gpost('user', { accessToken: googleToken({ sub: 'g-del' }), birthDate: '1990-01-01', acceptTerms: true })).body;
   assert.equal((await req('/me', { method: 'DELETE', body: { confirm: 'nope' } }, { token: G2.token, app: 'user' })).status, 400);
   assert.equal((await req('/me', { method: 'DELETE', body: { confirm: 'DELETE' } }, { token: G2.token, app: 'user' })).status, 200); ok('Google-only account can be deleted by typing DELETE');
 

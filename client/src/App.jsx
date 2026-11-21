@@ -7,6 +7,7 @@ import HostLanding from './pages/host/HostLanding.jsx';
 import { APP } from './apps.js';
 import Login from './pages/Login.jsx';
 import Reset from './pages/Reset.jsx';
+import AuthCallback from './pages/AuthCallback.jsx';
 import Legal from './pages/Legal.jsx';
 import Settings from './pages/Settings.jsx';
 import UserShell from './pages/user/UserShell.jsx';
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/" element={user ? <Navigate to={home} replace /> : landing} />
         <Route path="/login" element={user ? <Navigate to={home} replace /> : <Login />} />
         <Route path="/reset" element={<Reset />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         {['terms', 'privacy', 'refunds', 'guidelines', 'contact'].map((p) => <Route key={p} path={`/${p}`} element={<Legal />} />)}
 
         {APP === 'user' && <>

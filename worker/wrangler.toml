@@ -20,6 +20,9 @@ new_sqlite_classes = ["Hub"]
 
 [vars]
 APP = "user"
+# Google sign-in runs through Supabase Auth (public values; safe to commit)
+SUPABASE_URL = "https://edtnzipyxmclwdiyfeqm.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Egq0JeyEXYSdvE7MUN8HRw_YHnQVR2q"
 EMAIL_FROM = "Milo Julo <no-reply@example.com>"
 VAPID_SUBJECT = "mailto:support@example.com"
 

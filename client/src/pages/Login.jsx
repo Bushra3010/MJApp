@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import LegalFooter from '../components/LegalFooter.jsx';
@@ -24,7 +24,8 @@ export default function Login() {
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
   const { login, register, adopt } = useAuth();
-  const [google, setGoogle] = useState(null); // { credential, name, email } while finishing a Google sign-up
+  const location = useLocation();
+  const [google, setGoogle] = useState(location.state?.oauth || null); // { token, name, email } while finishing a Google sign-up
   const nav = useNavigate();
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -44,17 +45,17 @@ export default function Login() {
     } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
   };
   const home = { user: '/app', host: '/host', admin: '/admin' }[APP];
-  const sendGoogle = async (credential, extra = {}) => {
+  const sendGoogle = async (accessToken, extra = {}) => {
     setError(''); setWrongApp(null); setBusy(true);
     try {
-      const r = await api('/auth/google', { method: 'POST', body: { credential, ...extra } });
-      if (r.needsProfile) { setGoogle({ credential, name: r.name, email: r.email }); setMode('signup'); return; }
+      const r = await api('/auth/google', { method: 'POST', body: { accessToken, ...extra } });
+      if (r.needsProfile) { setGoogle({ token: accessToken, name: r.name, email: r.email }); setMode('signup'); return; }
       adopt(r.user); nav(home, { replace: true });
     } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
   };
   const finishGoogle = (e) => {
     e.preventDefault();
-    sendGoogle(google.credential, { birthDate: form.birthDate, gender: form.gender, languages: form.languages.join(','), acceptTerms: form.acceptTerms });
+    sendGoogle(google.token, { birthDate: form.birthDate, gender: form.gender, languages: form.languages.join(','), acceptTerms: form.acceptTerms });
   };
   const toggleLang = (l) => setForm((f) => ({ ...f, languages: f.languages.includes(l) ? f.languages.filter((x) => x !== l) : [...f.languages, l] }));
 
@@ -85,7 +86,7 @@ export default function Login() {
           </label>
           {error && <p className="error-text">{error}</p>}
           <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Please wait…' : COPY[APP].cta}</button>
-          <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setGoogle(null); setError(''); }}>Use a different account</button></p>
+          <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setGoogle(null); setError(''); nav('/login', { replace: true, state: null }); }}>Use a different account</button></p>
         </form>
       </div>
     );
@@ -140,7 +141,7 @@ export default function Login() {
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : mode === 'forgot' ? 'Send reset link' : COPY[APP].cta}
         </button>
-        {mode !== 'forgot' && <GoogleButton onCredential={(cred) => sendGoogle(cred)} text={mode === 'signup' ? 'signup_with' : 'continue_with'} />}
+        {mode !== 'forgot' && <GoogleButton label={mode === 'signup' ? 'Sign up with Google' : 'Continue with Google'} onError={setError} />}
         {mode === 'login' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></p>}
         {mode === 'forgot' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('login'); setInfo(''); }}>Back to log in</button></p>}
         {APP === 'admin' && mode === 'login' && <p className="faint" style={{ textAlign: 'center', marginTop: 10 }}>First time? <button type="button" className="link" onClick={() => { setMode('signup'); setError(''); }}>Set up the admin account</button></p>}

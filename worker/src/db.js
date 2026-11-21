@@ -159,6 +159,9 @@ const SCHEMA = [
   // v2 — Sign in with Google
   `ALTER TABLE users ADD COLUMN google_sub TEXT;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub);`,
+  // v3 — Google sign-in runs through Supabase Auth; link accounts by Supabase user id
+  `ALTER TABLE users ADD COLUMN supabase_id TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users(supabase_id);`,
 ];
 
 export const DEFAULT_SETTINGS = {
