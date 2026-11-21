@@ -100,3 +100,17 @@ npx wrangler secret put ANDROID_SHA256_FINGERPRINT
 ## Limits to know
 - One Durable Object runs all realtime traffic. That covers thousands of connected users. Past that, shard by region.
 - Photos are capped at 2 MB (the app resizes to ~50 KB). For heavy media, move uploads to R2.
+
+## Sign in with Google (via Supabase)
+Live on all three apps.
+
+| Piece | Where |
+| --- | --- |
+| Supabase project | `edtnzipyxmclwdiyfeqm` ("milojulooo@gmail.com's Project"). Authentication → Providers → Google is **enabled** |
+| Supabase redirect URLs | `https://milo-julo…/auth/callback`, `https://milo-julo-host…/auth/callback`, `https://milo-julo-admin…/auth/callback` (Authentication → URL Configuration) |
+| Google Cloud project | "Milo Julo" (`pro-signal-515422-v3`), owned by milojulooo@gmail.com. Published (In production) |
+| Google OAuth client | "Milo Julo Web", Client ID `1069480501329-gtki9bt0uvrjhdbs5c3jmsjtn3tg2437.apps.googleusercontent.com`, redirect URI `https://edtnzipyxmclwdiyfeqm.supabase.co/auth/v1/callback`. The client secret is stored only in Supabase |
+| Worker vars | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` in `worker/wrangler.toml` (public values) |
+
+The "Continue with Google" button only appears while Google is enabled in Supabase. The server checks this every minute.
+If you add a custom domain to an app, add its `/auth/callback` to Supabase's redirect URLs.
