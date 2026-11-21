@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 8787",
-    "deploy": "npm --prefix ../client run build && wrangler deploy"
+    "deploy": "npm --prefix ../client run build && wrangler deploy && wrangler deploy -c apps/host/wrangler.toml && wrangler deploy -c apps/admin/wrangler.toml"
   },
   "dependencies": {
     "hono": "^4.13.19",

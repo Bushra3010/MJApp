@@ -29,7 +29,7 @@ export async function buyPack(packId) {
       description: order.description,
       image: `${location.origin}/icon-192.png`,
       prefill: order.prefill,
-      theme: { color: '#EC1C7C' },
+      theme: { color: '#F41470' },
       handler: (resp) => api('/wallet/verify', { method: 'POST', body: resp }).then((r) => resolve(r.coins)).catch(reject),
       modal: { ondismiss: () => resolve(null) },
     });

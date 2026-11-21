@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "vite --mode user",
+    "build": "rm -rf dist && vite build --mode user && vite build --mode host && vite build --mode admin",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:host": "vite --mode host",
+    "dev:admin": "vite --mode admin"
   },
   "dependencies": {
     "react": "^18.3.1",

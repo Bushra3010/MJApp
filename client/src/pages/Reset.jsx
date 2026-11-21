@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
-import { homeFor } from '../lib/roles.js';
+import { APP, APP_URL } from '../apps.js';
 
 export default function Reset() {
   const token = window.location.hash.slice(1); // in the fragment, so it never reaches server logs
@@ -14,9 +14,10 @@ export default function Reset() {
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setError('');
     try {
-      const { user } = await api('/auth/reset', { method: 'POST', body: { token, password: pw } });
+      const res = await api('/auth/reset', { method: 'POST', body: { token, password: pw } });
       history.replaceState(null, '', '/reset');
-      adopt(user); nav(homeFor(user.role), { replace: true });
+      if (res.loginElsewhere) { window.location.href = `${APP_URL[res.loginElsewhere]}/login`; return; }
+      adopt(res.user); nav({ user: '/app', host: '/host', admin: '/admin' }[APP], { replace: true });
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
   return (

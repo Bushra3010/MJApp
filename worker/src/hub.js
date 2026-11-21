@@ -8,7 +8,11 @@ import { buildApi } from './routes.js';
 
 const RING_MS = 30_000;
 const OFFLINE_GRACE_MS = 8_000;
-export const COOKIE = 'mj_session';
+export const APPS = ['user', 'host', 'admin'];
+// Each app (friends / host / admin) has its own session cookie, and a session only works in the app it was made for.
+export const cookieName = (app) => `mj_${app}`;
+/** Which app a request came from. The app's Worker stamps this header; browsers can't reach the Hub directly. */
+export const appOf = (req) => (APPS.includes(req.headers.get('x-mj-app')) ? req.headers.get('x-mj-app') : 'user');
 
 export class Hub extends DurableObject {
   constructor(ctx, env) {
@@ -50,20 +54,24 @@ export class Hub extends DurableObject {
     return out;
   }
 
-  async userFromToken(token) {
+  /** The signed-in user for a request, only if their session was issued by this same app and matches their role. */
+  async userFor(req) {
+    const app = appOf(req);
+    const token = this.tokenFrom(req, app);
     if (!token || !this.env.JWT_SECRET) return null;
     const p = await verifyJwt(token, this.env.JWT_SECRET);
-    if (!p) return null;
+    if (!p || p.app !== app) return null;
     const u = this.db.prepare('SELECT * FROM users WHERE id = ?').get(p.id);
-    if (!u || u.status === 'blocked' || (u.token_version || 0) !== (p.tv || 0)) return null;
+    if (!u || u.status === 'blocked' || u.role !== app || (u.token_version || 0) !== (p.tv || 0)) return null;
     return u;
   }
 
-  tokenFrom(req) {
+  tokenFrom(req, app) {
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer /, '');
     if (bearer) return bearer;
-    const m = (req.headers.get('cookie') || '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`));
-    return m ? decodeURIComponent(m.slice(COOKIE.length + 1)) : null;
+    const name = cookieName(app);
+    const m = (req.headers.get('cookie') || '').split(/;\s*/).find((c) => c.startsWith(`${name}=`));
+    return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
   }
 
   /** In-memory sliding-window limiter (per Durable Object instance). */
@@ -123,7 +131,7 @@ export class Hub extends DurableObject {
 
   async openSocket(req) {
     if (req.headers.get('upgrade') !== 'websocket') return new Response('Expected WebSocket', { status: 426 });
-    const u = await this.userFromToken(this.tokenFrom(req));
+    const u = await this.userFor(req);
     if (!u) return new Response('unauthorized', { status: 401 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);

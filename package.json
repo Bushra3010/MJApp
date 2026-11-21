@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n api,web -c magenta,cyan \"npm --prefix worker run dev\" \"npm --prefix client run dev\"",
+    "dev": "concurrently -n api,friends,host,admin -c magenta,cyan,yellow,green \"npm --prefix worker run dev\" \"npm --prefix client run dev\" \"npm --prefix client run dev:host\" \"npm --prefix client run dev:admin\"",
     "build": "npm --prefix client run build",
     "deploy": "npm --prefix worker run deploy",
     "test": "node tests/e2e.test.mjs"

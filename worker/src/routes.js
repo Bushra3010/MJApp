@@ -8,7 +8,7 @@ import { vapidKeys } from './push.js';
 import {
   razorpayEnabled, createRazorpayOrder, verifyCheckoutSignature, verifyWebhookSignature, sendEmail, iceServersFor,
 } from './services.js';
-import { COOKIE } from './hub.js';
+import { appOf, cookieName } from './hub.js';
 
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const LANG_RE = /^[\p{L} ,]{0,200}$/u;
@@ -31,13 +31,13 @@ export function buildApi(h) {
     } catch (e) {
       if (e instanceof z.ZodError) return c.json({ error: e.issues[0]?.message || 'Invalid input' }, 400);
       if (!e.status) console.error(e);
-      return c.json({ error: e.status ? e.message : 'Something went wrong' }, e.status || 500);
+      return c.json({ error: e.status ? e.message : 'Something went wrong', ...(e.extra || {}) }, e.status || 500);
     }
   };
   const body = async (c) => { try { return await c.req.json(); } catch { return {}; } };
   const parse = (schema, data) => schema.parse(data ?? {});
   const auth = (...roles) => async (c, next) => {
-    const u = await h.userFromToken(h.tokenFrom(c.req.raw));
+    const u = await h.userFor(c.req.raw);
     if (!u) return c.json({ error: 'Please log in again' }, 401);
     if (roles.length && !roles.includes(u.role)) return c.json({ error: 'Not allowed' }, 403);
     c.set('user', u);
@@ -47,12 +47,15 @@ export function buildApi(h) {
     if (h.limited(`${name}:${ip(c)}`, max, minutes * 60_000)) return c.json({ error: 'Too many attempts. Please wait a few minutes.' }, 429);
     return next();
   };
+  const APP_LABEL = { user: 'Milo Julo', host: 'Milo Julo Host', admin: 'Milo Julo Admin' };
   const startSession = async (c, u) => {
-    const token = await signJwt({ id: u.id, role: u.role, tv: u.token_version || 0 }, env.JWT_SECRET);
-    setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Lax', secure: isHttps(c), maxAge: 30 * 24 * 3600, path: '/' });
+    const app = appOf(c.req.raw);
+    if (u.role !== app) throw Object.assign(bad(`This is a ${u.role === 'user' ? 'member' : u.role} account. Please use the ${APP_LABEL[u.role]} app.`, 403), { extra: { code: 'WRONG_APP', role: u.role } });
+    const token = await signJwt({ id: u.id, role: u.role, app, tv: u.token_version || 0 }, env.JWT_SECRET);
+    setCookie(c, cookieName(app), token, { httpOnly: true, sameSite: 'Lax', secure: isHttps(c), maxAge: 30 * 24 * 3600, path: '/' });
     return token;
   };
-  const endSession = (c) => deleteCookie(c, COOKIE, { path: '/' });
+  const endSession = (c) => deleteCookie(c, cookieName(appOf(c.req.raw)), { path: '/' });
 
   app.use('*', async (c, next) => {
     if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) return c.json({ error: 'Server not configured: set the JWT_SECRET secret (32+ characters).' }, 500);
@@ -66,7 +69,6 @@ export function buildApi(h) {
     name: z.string().trim().min(2, 'Enter your name').max(40),
     email: z.string().trim().toLowerCase().email('Enter a valid email').max(120),
     password: z.string().min(8, 'Password must be at least 8 characters').max(100),
-    role: z.enum(['user', 'host']).default('user'),
     gender: z.enum(['', 'female', 'male', 'other']).default(''),
     languages: z.string().regex(LANG_RE).default('Hindi,English'),
     birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter your date of birth'),
@@ -83,7 +85,10 @@ export function buildApi(h) {
     const f = parse(registerSchema, await body(c));
     if (Number.isNaN(Date.parse(f.birthDate)) || age(f.birthDate) < 18) throw bad('You must be 18 or older to use Milo Julo');
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(f.email)) throw bad('An account with this email already exists');
-    const role = adminEmails().includes(f.email) ? 'admin' : f.role;
+    // The app decides the account type: the friends app makes members, the host app makes hosts,
+    // and the admin app only accepts emails listed in ADMIN_EMAILS.
+    const role = appOf(c.req.raw);
+    if (role === 'admin' && !adminEmails().includes(f.email)) throw bad('Admin accounts can only be created for approved admin emails.', 403);
     const pw = await hashPassword(f.password);
     const id = db.prepare('INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date) VALUES (?,?,?,?,?,?,?)')
       .run(role, f.name, f.email, pw, f.gender, f.languages, f.birthDate).lastInsertRowid;
@@ -99,7 +104,7 @@ export function buildApi(h) {
     let u = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (!u || !(await verifyPassword(password, u.password_hash))) throw bad('Wrong email or password', 401);
     if (u.status === 'blocked') throw bad('This account has been blocked. Contact support.', 403);
-    if (adminEmails().includes(email) && u.role !== 'admin') {
+    if (appOf(c.req.raw) === 'admin' && adminEmails().includes(email) && u.role !== 'admin') {
       db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(u.id);
       db.prepare('DELETE FROM host_profiles WHERE user_id = ?').run(u.id);
       u = fresh(u.id);
@@ -120,7 +125,7 @@ export function buildApi(h) {
 
   app.post('/auth/forgot', limit('email', 5, 60), R(async (c) => {
     const { email } = parse(z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email') }), await body(c));
-    const u = db.prepare("SELECT * FROM users WHERE email = ? AND status = 'active'").get(email);
+    const u = db.prepare("SELECT * FROM users WHERE email = ? AND status = 'active' AND role = ?").get(email, appOf(c.req.raw));
     if (u) {
       const token = randomToken(32);
       db.prepare("INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))").run(await sha256Hex(token), u.id);
@@ -148,6 +153,7 @@ export function buildApi(h) {
     })();
     h.disconnectUser(row.user_id);
     const u = fresh(row.user_id);
+    if (u.role !== appOf(c.req.raw)) return { ok: true, loginElsewhere: u.role };
     await startSession(c, u);
     return { user: h.me(u) };
   }));

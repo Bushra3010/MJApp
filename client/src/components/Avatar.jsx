@@ -1,9 +1,9 @@
-const PALETTE = ['#e8331c', '#ff6a2b', '#c2410c', '#d9480f', '#b5401b', '#e8590c', '#a8321a', '#f76707'];
+const PALETTE = ['#f41470', '#e0005c', '#c2185b', '#d6336c', '#b0105a', '#e64a8b', '#a3134f', '#f72585'];
 export const initials = (n = '') => n.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?';
 export const colorFor = (n = '') => PALETTE[[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
 export const gradFor = (n = '') => { const c = colorFor(n); return `linear-gradient(150deg, color-mix(in srgb, ${c} 75%, #fff) 0%, ${c} 45%, color-mix(in srgb, ${c} 65%, #2a0018) 100%)`; };
 
-const WARM = [['#ff8a3d', '#e8331c', '#4a160c'], ['#f3a37c', '#c2410c', '#2e140c'], ['#ff6a2b', '#b5401b', '#331209'], ['#ffb27a', '#e8590c', '#3a1a10']];
+const WARM = [['#ff7ab0', '#f41470', '#4a0c26'], ['#f7a1c4', '#c2185b', '#2e0c1c'], ['#fc4c94', '#b0105a', '#33091f'], ['#ff9cc5', '#e0005c', '#3a1022']];
 export const warmFor = (n = '') => { const [a, b, c] = WARM[[...n].reduce((x, ch) => x + ch.charCodeAt(0), 0) % WARM.length]; return `radial-gradient(120% 90% at 50% 20%, ${a} 0%, ${b} 45%, ${c} 100%)`; };
 
 export default function Avatar({ src, name = '', size = 48, online, busy, className = '' }) {

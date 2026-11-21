@@ -2,8 +2,9 @@ import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/Icon.jsx';
 import LegalFooter from '../components/LegalFooter.jsx';
+import { APP_URL } from '../apps.js';
 
-function SlideToStart({ to, label }) {
+export function SlideToStart({ to, label }) {
   const nav = useNavigate();
   const track = useRef(null);
   const start = useRef(null);
@@ -55,6 +56,7 @@ export default function Landing() {
         <p className="sub">Meet New People, Spark Real Connections, And See Where It Goes.</p>
         <SlideToStart to="/login?mode=signup" label="Get Started" />
         <p className="alt">Already have an account? <Link to="/login">Log in</Link></p>
+        <p className="alt" style={{ marginTop: 6, fontSize: 13 }}>Want to earn by talking? <a href={APP_URL.host}>Become a host →</a></p>
         <LegalFooter />
       </div>
     </div>

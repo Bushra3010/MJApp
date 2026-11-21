@@ -1,6 +1,15 @@
 # Deploying Milo Julo on Cloudflare
 
-**Live:** https://milo-julo.milojulooo.workers.dev (Cloudflare account milojulooo@gmail.com). `JWT_SECRET` and `ADMIN_EMAILS` are set.
+**Live (Cloudflare account milojulooo@gmail.com):**
+
+| App | Link | Worker | Who signs up there |
+| --- | --- | --- | --- |
+| Milo Julo (make friends) | https://milo-julo.milojulooo.workers.dev | `milo-julo` (owns the shared Hub) | Members |
+| Milo Julo Host | https://milo-julo-host.milojulooo.workers.dev | `milo-julo-host` | Hosts (wait for admin approval) |
+| Milo Julo Admin | https://milo-julo-admin.milojulooo.workers.dev | `milo-julo-admin` | Only emails listed in `ADMIN_EMAILS` |
+
+All three share one backend (the `Hub` Durable Object in `milo-julo`). Each app's Worker stamps which app a request came from, and a session only works in the app it was created in. Secrets (`JWT_SECRET`, `ADMIN_EMAILS`, payment keys…) are set on `milo-julo` only.
+Build all three with `npm run build` (outputs `client/dist/{user,host,admin}`) and deploy all three with `npm run deploy`.
 
 Everything runs on Cloudflare:
 
@@ -63,7 +72,8 @@ Add the domain to Cloudflare (Websites → Add), then Workers → milo-julo → 
 Every push to `main` on GitHub (Bushra3010/MJApp) deploys automatically via Cloudflare Workers Builds:
 - Root directory `/`
 - Build: `npm ci && npm --prefix client ci && npm --prefix worker ci && npm --prefix client run build`
-- Deploy: `cd worker && npx wrangler deploy`
+- Deploy: `cd worker && npx wrangler deploy && npx wrangler deploy -c apps/host/wrangler.toml && npx wrangler deploy -c apps/admin/wrangler.toml`
+  (if the dashboard still has only `cd worker && npx wrangler deploy`, pushes update the friends app but not the host and admin apps)
 
 Pushes to other branches don't change the live site. To deploy by hand instead:
 ```bash

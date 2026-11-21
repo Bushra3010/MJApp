@@ -1,19 +1,19 @@
 :root {
-  /* Accent scale (names kept for compatibility; values are the warm orange-red palette) */
-  --pink-50: #3a2420;
-  --pink-100: #4a2a22;
-  --pink-300: #ff8a5c;
-  --pink-500: #ff5a1f;
-  --pink-600: #ff6a33;
-  --pink-700: #e8401a;
+  /* Accent scale: Milo Julo logo pink (#F41470). Names kept for compatibility. */
+  --pink-50: #3a1a2a;
+  --pink-100: #4a1d33;
+  --pink-300: #ff7ab0;
+  --pink-500: #f41470;
+  --pink-600: #fc4c94;
+  --pink-700: #e0005c;
   --violet: #7c3aed;
   --blue: #3b82f6;
-  --red-btn: #e8331c;
+  --red-btn: #f41470;
   --green-btn: #43a73a;
-  --grad: linear-gradient(135deg, #ff6a2b 0%, #e8331c 100%);
-  --grad-soft: linear-gradient(135deg, #3a2420 0%, #2e2230 100%);
+  --grad: linear-gradient(135deg, #f41470 0%, #c20d5c 100%);
+  --grad-soft: linear-gradient(135deg, #3a1a2a 0%, #2e2230 100%);
   --grad-green: linear-gradient(135deg, #52b947 0%, #3a9a31 100%);
-  --grad-hero: linear-gradient(180deg, #b5401b 0%, #6e2a17 38%, #2a2a2c 72%);
+  --grad-hero: linear-gradient(180deg, #b0105a 0%, #5e0f35 38%, #2a2a2c 72%);
   --bg: #1c1c1e;
   --surface: #2a2a2c;
   --surface-2: #323234;
@@ -26,7 +26,7 @@
   --red: #ff453a;
   --shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
   --shadow-sm: 0 2px 10px -2px rgba(0, 0, 0, 0.45);
-  --shadow-pink: 0 10px 26px -8px rgba(232, 51, 28, 0.6);
+  --shadow-pink: 0 10px 26px -8px rgba(244, 20, 112, 0.6);
   --r-sm: 14px;
   --r: 20px;
   --r-lg: 28px;
@@ -180,11 +180,11 @@ textarea.input { height: auto; padding: 12px 16px; resize: vertical; }
 .landing {
   min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: max(32px, env(safe-area-inset-top)) 20px 32px; text-align: center;
   background:
-    radial-gradient(70% 45% at 50% 0%, rgba(181, 64, 27, .55), transparent 75%),
-    radial-gradient(50% 35% at 100% 10%, rgba(232, 51, 28, .12), transparent 70%),
+    radial-gradient(70% 45% at 50% 0%, rgba(176, 16, 90, .55), transparent 75%),
+    radial-gradient(50% 35% at 100% 10%, rgba(244, 20, 112, .12), transparent 70%),
     var(--bg);
 }
-.landing img.logo { width: min(200px, 56vw); height: auto; border-radius: 36px; box-shadow: 0 24px 50px -18px rgba(236, 28, 124, .45); animation: float 5s ease-in-out infinite; }
+.landing img.logo { width: min(200px, 56vw); height: auto; border-radius: 36px; box-shadow: 0 24px 50px -18px rgba(244, 20, 112, .45); animation: float 5s ease-in-out infinite; }
 @keyframes float { 50% { transform: translateY(-6px); } }
 .landing .hero-title { font-size: 30px; font-weight: 900; letter-spacing: -.02em; margin-top: 26px; line-height: 1.15; }
 .landing .hero-title span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -214,7 +214,7 @@ textarea.input { height: auto; padding: 12px 16px; resize: vertical; }
 .stories { display: flex; gap: 14px; overflow-x: auto; padding: 4px 2px 6px; margin: 0 -16px; padding-left: 18px; padding-right: 18px; scrollbar-width: none; }
 .stories::-webkit-scrollbar { display: none; }
 .story { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 72px; flex-shrink: 0; font-size: 12px; font-weight: 800; }
-.story .ring { padding: 3px; border-radius: 50%; background: conic-gradient(from 200deg, #ff5fa8, #ec1c7c, #8b3dff, #ff5fa8); animation: spin 6s linear infinite; }
+.story .ring { padding: 3px; border-radius: 50%; background: conic-gradient(from 200deg, #fc4c94, #f41470, #8b3dff, #fc4c94); animation: spin 6s linear infinite; }
 .story .ring > * { animation: spin 6s linear infinite reverse; }
 .story .ring .avatar { border: 3px solid var(--bg); border-radius: 50%; }
 .story span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -490,7 +490,7 @@ table.t .avatar { width: 34px; height: 34px; }
 .collage .pcard .lbl b { display: block; font-size: 15px; font-weight: 700; }
 .collage .pcard .lbl small { font-size: 10px; opacity: .8; }
 .collage .c1 { left: 24px; top: 30px; transform: rotate(-12deg); background: linear-gradient(160deg, #e9e2dc, #b9aca3); animation: bob1 6s ease-in-out infinite; }
-.collage .c2 { right: 18px; top: 50px; transform: rotate(10deg); background: linear-gradient(160deg, #f1a383, #d2582e 55%, #3a1a12); animation: bob2 6s ease-in-out infinite; }
+.collage .c2 { right: 18px; top: 50px; transform: rotate(10deg); background: linear-gradient(160deg, #ff9cc5, #f41470 55%, #3a0c22); animation: bob2 6s ease-in-out infinite; }
 @keyframes bob1 { 50% { transform: rotate(-10deg) translateY(-6px); } }
 @keyframes bob2 { 50% { transform: rotate(8deg) translateY(6px); } }
 .collage .bubble-ic { position: absolute; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; box-shadow: 0 10px 24px -8px rgba(0, 0, 0, .6); z-index: 3; }
@@ -501,7 +501,7 @@ table.t .avatar { width: 34px; height: 34px; }
 .hero h1.big em { font-style: normal; color: var(--pink-500); }
 .hero .sub { color: #c7c7cc; font-size: 15px; line-height: 1.45; margin: 14px auto 0; max-width: 310px; }
 .slide { position: relative; width: 100%; max-width: 360px; height: 72px; border-radius: 999px; background: #3a3a3c; margin: 26px auto 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; user-select: none; }
-.slide .knob { position: absolute; left: 8px; top: 8px; width: 56px; height: 56px; border-radius: 50%; background: var(--red-btn); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px -6px rgba(232, 51, 28, .8); cursor: grab; z-index: 2; }
+.slide .knob { position: absolute; left: 8px; top: 8px; width: 56px; height: 56px; border-radius: 50%; background: var(--red-btn); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px -6px rgba(244, 20, 112, .8); cursor: grab; z-index: 2; }
 .slide .knob.anim { transition: transform .35s var(--ease); }
 .slide .txt { font-weight: 600; font-size: 16px; }
 .slide .chev { position: absolute; right: 26px; color: #8e8e93; display: flex; animation: nudge 1.4s ease-in-out infinite; }
@@ -536,7 +536,7 @@ table.t .avatar { width: 34px; height: 34px; }
 .act { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; transition: transform .15s var(--ease), opacity .2s, filter .2s; }
 .act:active:not(:disabled) { transform: scale(.88); }
 .act:disabled { opacity: .35; cursor: not-allowed; }
-.act.red { background: var(--red-btn); box-shadow: 0 12px 26px -10px rgba(232, 51, 28, .9); }
+.act.red { background: var(--red-btn); box-shadow: 0 12px 26px -10px rgba(244, 20, 112, .9); }
 .act.violet { background: var(--violet); box-shadow: 0 12px 26px -10px rgba(124, 58, 237, .9); }
 .act.green { background: var(--green-btn); box-shadow: 0 12px 26px -10px rgba(67, 167, 58, .9); }
 .act.blue { background: var(--blue); box-shadow: 0 12px 26px -10px rgba(59, 130, 246, .9); }
@@ -566,3 +566,13 @@ table.t .avatar { width: 34px; height: 34px; }
 .hero-tag i { width: 7px; height: 7px; border-radius: 50%; background: #8e8e93; }
 .hero-tag.on i { background: var(--green); }
 .hero-tag.busy i { background: var(--amber); }
+
+/* ---------- three apps ---------- */
+.app-badge { display: inline-block; margin: 0 auto 14px; padding: 4px 12px; border-radius: 999px; background: var(--pink-50); color: var(--pink-600); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.auth-card > .app-badge { display: table; }
+.app-badge.inline { margin: 0 0 0 6px; vertical-align: middle; }
+.host-points { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; text-align: left; }
+.host-points li { display: flex; gap: 12px; align-items: flex-start; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); border-radius: var(--r); padding: 14px; }
+.host-points .ic { width: 38px; height: 38px; border-radius: 12px; background: var(--grad); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.host-points b { display: block; font-size: 15px; font-weight: 700; }
+.host-points span { font-size: 13px; color: #c7c7cc; line-height: 1.4; }
