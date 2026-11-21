@@ -9,7 +9,7 @@ import Sheet from '../components/Sheet.jsx';
 import LegalFooter from '../components/LegalFooter.jsx';
 
 export default function Settings() {
-  const { user, logout, endSession } = useAuth();
+  const { user, logout, endSession, refresh } = useAuth();
   const toast = useToast();
   const nav = useNavigate();
   const [push, setPush] = useState(false);
@@ -28,12 +28,12 @@ export default function Settings() {
   };
   const changePw = async (e) => {
     e.preventDefault(); setBusy(true);
-    try { await api('/me/password', { method: 'POST', body: pw }); toast('Password changed. Other devices were signed out.', 'success'); setSheet(null); setPw({ current: '', password: '' }); }
+    try { await api('/me/password', { method: 'POST', body: pw }); toast(user.has_password ? 'Password changed. Other devices were signed out.' : 'Password set. You can now also log in with email.', 'success'); setSheet(null); setPw({ current: '', password: '' }); refresh?.(); }
     catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
   const del = async (e) => {
     e.preventDefault(); setBusy(true);
-    try { await api('/me', { method: 'DELETE', body: { password: delPw } }); endSession(); nav('/', { replace: true }); toast('Your account has been deleted'); }
+    try { await api('/me', { method: 'DELETE', body: user.has_password ? { password: delPw } : { confirm: delPw } }); endSession(); nav('/', { replace: true }); toast('Your account has been deleted'); }
     catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
@@ -49,7 +49,7 @@ export default function Settings() {
         </button>
         <div className="section-title">Security</div>
         <div className="card">
-          <button className="list-row" onClick={() => setSheet('pw')}><div className="txt"><b>Change password</b></div></button>
+          <button className="list-row" onClick={() => setSheet('pw')}><div className="txt"><b>{user.has_password ? 'Change password' : 'Set a password'}</b>{user.google_linked && <span>Signed in with Google</span>}</div></button>
           <button className="list-row" onClick={() => logout(true).then(() => nav('/'))}><div className="txt"><b>Sign out of all devices</b><span>Use this if you lost a phone</span></div></button>
           <button className="list-row" style={{ borderBottom: 0 }} onClick={() => logout().then(() => nav('/'))}><div className="txt"><b>Log out</b></div></button>
         </div>
@@ -62,9 +62,9 @@ export default function Settings() {
         <LegalFooter />
       </div>
       {sheet === 'pw' && (
-        <Sheet title="Change password" onClose={() => setSheet(null)}>
+        <Sheet title={user.has_password ? 'Change password' : 'Set a password'} onClose={() => setSheet(null)}>
           <form onSubmit={changePw}>
-            <div className="field"><label htmlFor="cur">Current password</label><input id="cur" type="password" className="input" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required autoComplete="current-password" /></div>
+            {user.has_password && <div className="field"><label htmlFor="cur">Current password</label><input id="cur" type="password" className="input" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required autoComplete="current-password" /></div>}
             <div className="field"><label htmlFor="new">New password</label><input id="new" type="password" className="input" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required autoComplete="new-password" /></div>
             <button className="btn btn-primary btn-block" disabled={busy}>Save</button>
           </form>
@@ -76,7 +76,9 @@ export default function Settings() {
             <p className="muted" style={{ marginBottom: 12 }}>
               This can't be undone. Your profile, photo, chats and {user.role === 'user' ? <>your <b>{user.coins} unused coins</b></> : <>your <b>unpaid earnings</b></>} will be gone for good.
             </p>
-            <div className="field"><label htmlFor="dp">Enter your password to confirm</label><input id="dp" type="password" className="input" value={delPw} onChange={(e) => setDelPw(e.target.value)} required autoComplete="current-password" /></div>
+            {user.has_password
+              ? <div className="field"><label htmlFor="dp">Enter your password to confirm</label><input id="dp" type="password" className="input" value={delPw} onChange={(e) => setDelPw(e.target.value)} required autoComplete="current-password" /></div>
+              : <div className="field"><label htmlFor="dp">Type DELETE to confirm</label><input id="dp" className="input" value={delPw} onChange={(e) => setDelPw(e.target.value)} required autoCapitalize="characters" autoComplete="off" /></div>}
             <button className="btn btn-danger btn-block" disabled={busy}>{busy ? 'Deleting…' : 'Delete my account'}</button>
           </form>
         </Sheet>

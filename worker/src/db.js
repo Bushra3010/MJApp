@@ -156,6 +156,9 @@ const SCHEMA = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v2 — Sign in with Google
+  `ALTER TABLE users ADD COLUMN google_sub TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google ON users(google_sub);`,
 ];
 
 export const DEFAULT_SETTINGS = {

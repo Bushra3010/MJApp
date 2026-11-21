@@ -50,6 +50,9 @@ export class Hub extends DurableObject {
 
   me(u) {
     const out = publicUser(u);
+    out.has_password = String(u.password_hash || '').startsWith('pbkdf2$');
+    out.google_linked = !!u.google_sub;
+    delete out.google_sub;
     if (u.role === 'host') out.host = this.db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id);
     return out;
   }

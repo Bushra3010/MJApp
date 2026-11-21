@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import LegalFooter from '../components/LegalFooter.jsx';
+import GoogleButton from '../components/GoogleButton.jsx';
 import { APP, APP_NAME, APP_URL } from '../apps.js';
 
 const COPY = {
@@ -22,7 +23,8 @@ export default function Login() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
-  const { login, register } = useAuth();
+  const { login, register, adopt } = useAuth();
+  const [google, setGoogle] = useState(null); // { credential, name, email } while finishing a Google sign-up
   const nav = useNavigate();
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -41,7 +43,53 @@ export default function Login() {
       nav({ user: '/app', host: '/host', admin: '/admin' }[APP], { replace: true });
     } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
   };
+  const home = { user: '/app', host: '/host', admin: '/admin' }[APP];
+  const sendGoogle = async (credential, extra = {}) => {
+    setError(''); setWrongApp(null); setBusy(true);
+    try {
+      const r = await api('/auth/google', { method: 'POST', body: { credential, ...extra } });
+      if (r.needsProfile) { setGoogle({ credential, name: r.name, email: r.email }); setMode('signup'); return; }
+      adopt(r.user); nav(home, { replace: true });
+    } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
+  };
+  const finishGoogle = (e) => {
+    e.preventDefault();
+    sendGoogle(google.credential, { birthDate: form.birthDate, gender: form.gender, languages: form.languages.join(','), acceptTerms: form.acceptTerms });
+  };
   const toggleLang = (l) => setForm((f) => ({ ...f, languages: f.languages.includes(l) ? f.languages.filter((x) => x !== l) : [...f.languages, l] }));
+
+  if (google) {
+    return (
+      <div className="landing">
+        <img className="logo" src="/logo.png" alt="Milo Julo" style={{ width: 110, marginBottom: 16 }} />
+        <form className="card auth-card" onSubmit={finishGoogle}>
+          <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 6 }}>Almost done</h2>
+          <p className="muted" style={{ fontSize: 14, marginBottom: 14 }}>{APP === 'host' ? 'A few details for your host profile.' : 'A few details to finish your account.'}</p>
+          <div className="google-who"><span aria-hidden="true">G</span><div><b>{google.name || 'Google account'}</b><span className="faint">{google.email}</span></div></div>
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <div className="field" style={{ flex: 1 }}><label htmlFor="gdob">Date of birth</label><input id="gdob" type="date" className="input" value={form.birthDate} onChange={set('birthDate')} max={maxDob()} required /></div>
+            {APP !== 'admin' && <div className="field" style={{ flex: 1 }}><label htmlFor="ggender">Gender</label>
+              <select id="ggender" className="input" value={form.gender} onChange={set('gender')}>
+                <option value="">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
+              </select>
+            </div>}
+          </div>
+          {APP !== 'admin' && <div className="field"><label>Languages you speak</label>
+            <div className="filters" style={{ flexWrap: 'wrap' }}>
+              {LANGS.map((l) => <button type="button" key={l} className={form.languages.includes(l) ? 'on' : ''} onClick={() => toggleLang(l)}>{l}</button>)}
+            </div>
+          </div>}
+          <label className="check">
+            <input type="checkbox" checked={form.acceptTerms} onChange={(e) => setForm({ ...form, acceptTerms: e.target.checked })} required />
+            <span>I'm 18 or older and I agree to the <Link className="link" to="/terms" target="_blank">Terms</Link>, <Link className="link" to="/privacy" target="_blank">Privacy Policy</Link> and <Link className="link" to="/guidelines" target="_blank">Community Guidelines</Link>.</span>
+          </label>
+          {error && <p className="error-text">{error}</p>}
+          <button className="btn btn-primary btn-block" disabled={busy}>{busy ? 'Please wait…' : COPY[APP].cta}</button>
+          <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setGoogle(null); setError(''); }}>Use a different account</button></p>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="landing">
@@ -92,6 +140,7 @@ export default function Login() {
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : mode === 'forgot' ? 'Send reset link' : COPY[APP].cta}
         </button>
+        {mode !== 'forgot' && <GoogleButton onCredential={(cred) => sendGoogle(cred)} text={mode === 'signup' ? 'signup_with' : 'continue_with'} />}
         {mode === 'login' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></p>}
         {mode === 'forgot' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('login'); setInfo(''); }}>Back to log in</button></p>}
         {APP === 'admin' && mode === 'login' && <p className="faint" style={{ textAlign: 'center', marginTop: 10 }}>First time? <button type="button" className="link" onClick={() => { setMode('signup'); setError(''); }}>Set up the admin account</button></p>}

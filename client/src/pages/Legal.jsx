@@ -46,6 +46,7 @@ const PAGES = {
     <h2>Who we share it with</h2>
     <ul>
       <li>Razorpay, for payments.</li>
+      <li>Google, if you choose "Continue with Google": we receive your name, email and a Google account ID, and nothing else from your Google account.</li>
       <li>Cloudflare, which hosts the app and database and relays calls when a direct connection isn't possible.</li>
       <li>Our email provider, for password-reset emails.</li>
       <li>Your browser's push service (Google, Apple or Mozilla) for notifications you turn on.</li>
