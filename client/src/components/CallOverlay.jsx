@@ -26,6 +26,7 @@ export default function CallOverlay() {
   const { call, localStream, remoteStream, accept, decline, hangup, toggleMute, toggleCam, flipCam, me } = useCall();
   const elapsed = useElapsed(call.phase === 'active' ? call.startedAt : null);
   if (call.phase === 'idle') return null;
+  const freeLeft = call.phase === 'active' && call.freeUntil ? Math.max(0, (call.freeUntil - Date.now()) / 1000) : 0;
 
   const peer = call.peer || {};
   const isVideo = call.type === 'video';
@@ -48,10 +49,14 @@ export default function CallOverlay() {
 
       <div className="top">
         <span className="pill">{isVideo ? <Icon name="video" size={16} /> : <Icon name="phone" size={16} />} {isVideo ? 'Video' : 'Audio'} · {call.rate} coins/min</span>
-        {call.phase === 'active' && (
-          isHost
+        {call.phase === 'active' && (freeLeft > 0
+          ? <span className="pill free">Free · {mmss(freeLeft)}</span>
+          : isHost
             ? <span className="pill">Earned <Coins value={call.earned || 0} /></span>
             : <span className={`pill ${call.lowBalance ? 'warn' : ''}`}>Spent <Coins value={call.charged || 0} /></span>
+        )}
+        {(call.phase === 'outgoing' || call.phase === 'incoming') && call.freeTrialMs > 0 && (
+          <span className="pill free">{isHost ? 'Free trial call' : `First ${Math.round(call.freeTrialMs / 1000)}s free`}</span>
         )}
       </div>
 
@@ -65,7 +70,10 @@ export default function CallOverlay() {
         <div className="sub" style={showRemoteVideo ? { position: 'absolute', top: 70, left: 20 } : {}}>
           {showRemoteVideo ? <span className="pill">{peer.name} · {status}</span> : status}
         </div>
-        {call.phase === 'active' && call.lowBalance && !isHost && (
+        {call.phase === 'active' && freeLeft > 0 && (
+          <span className="pill free">{isHost ? "Free trial — earnings start after it ends" : `Free trial · billing starts in ${Math.ceil(freeLeft)}s`}</span>
+        )}
+        {call.phase === 'active' && call.lowBalance && !isHost && freeLeft <= 0 && (
           <span className="pill warn">Low balance — call ends at the next minute. Recharge in Wallet.</span>
         )}
         {call.phase === 'ended' && call.summary?.status === 'ended' && (
@@ -75,7 +83,7 @@ export default function CallOverlay() {
 
       {call.phase === 'incoming' && (
         <div className="controls" style={{ gap: 64 }}>
-          <div><button className="cbtn end" onClick={decline} aria-label="Decline"><Icon name="end" size={28} fill /></button><div className="cbtn-label">Decline</div></div>
+          <div><button className="cbtn end" onClick={decline} aria-label={isHost ? 'Reject' : 'Decline'}><Icon name="end" size={28} fill /></button><div className="cbtn-label">{isHost ? 'Reject' : 'Decline'}</div></div>
           <div><button className="cbtn accept" onClick={accept} aria-label="Accept"><Icon name={isVideo ? 'video' : 'phone'} size={28} /></button><div className="cbtn-label">Accept</div></div>
         </div>
       )}

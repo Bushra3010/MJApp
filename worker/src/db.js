@@ -164,12 +164,41 @@ const SCHEMA = [
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users(supabase_id);`,
   // v4 — keep the fraction of a coin a host has earned but not yet been credited (in coin × percent units)
   `ALTER TABLE host_profiles ADD COLUMN earn_remainder INTEGER NOT NULL DEFAULT 0;`,
+  // v5 — free trial call, host payout details, host verification
+  `ALTER TABLE users ADD COLUMN free_trial_used_at TEXT;
+  ALTER TABLE live_calls ADD COLUMN free_trial_ms INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE calls ADD COLUMN free_seconds INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE host_profiles ADD COLUMN payout_method TEXT;
+  ALTER TABLE host_profiles ADD COLUMN upi_id TEXT;
+  ALTER TABLE host_profiles ADD COLUMN bank_holder TEXT;
+  ALTER TABLE host_profiles ADD COLUMN bank_account TEXT;
+  ALTER TABLE host_profiles ADD COLUMN bank_ifsc TEXT;
+  ALTER TABLE host_profiles ADD COLUMN kyc_status TEXT NOT NULL DEFAULT 'none';
+  ALTER TABLE host_profiles ADD COLUMN kyc_id_type TEXT;
+  ALTER TABLE host_profiles ADD COLUMN kyc_note TEXT;
+  ALTER TABLE payouts ADD COLUMN destination TEXT;
+  CREATE TABLE IF NOT EXISTS kyc_docs (
+    host_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('id','selfie')),
+    type TEXT NOT NULL, data BLOB NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (host_id, kind)
+  );`,
 ];
 
 export const DEFAULT_SETTINGS = {
   chat_cost: '1', host_share_pct: '50', signup_bonus: '50',
   default_audio_rate: '10', default_video_rate: '30', coin_to_inr: '0.5',
+  free_trial_enabled: '1',   // first call for a new member starts with free seconds
+  free_trial_seconds: '30',
 };
+
+/** Host profile as the host (or the public) may see it: bank account number masked. */
+export function safeHost(hp) {
+  if (!hp) return hp;
+  const { bank_account, earn_remainder, ...rest } = hp;
+  return { ...rest, bank_account_last4: bank_account ? String(bank_account).slice(-4) : null };
+}
 
 export const COIN_PACKS = [
   { id: 'p1', coins: 100, price: 49 },

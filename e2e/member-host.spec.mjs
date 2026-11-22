@@ -72,7 +72,7 @@ test('F04-H1 member buys coins (test mode) and sees the payment in history', asy
   await expect(page.getByText(/Bought 250 coins/).first()).toBeVisible();
 });
 
-test('F02-H1 / F02-H2 real video call: both see video, coins charged, call logged in chat', async ({ browser, page, context }) => {
+test('F02-H1 / F02-H2 / FT real video call: first call starts free, both see video, call logged', async ({ browser, page, context }) => {
   const h = await pair(browser, page, context);
   await page.goto(`${APP.user}/app`);
   const coinsBefore = (await (await page.request.get(`${APP.user}/api/me`)).json()).coins;
@@ -84,17 +84,21 @@ test('F02-H1 / F02-H2 real video call: both see video, coins charged, call logge
   for (const p of [page, h.page]) {
     await expect.poll(() => p.evaluate(() => document.querySelector('video.remote')?.videoWidth || 0), { timeout: 20_000 }).toBeGreaterThan(0);
   }
-  await expect(page.locator('.call').getByText(/Spent/)).toBeVisible();
-  await expect(h.page.locator('.call').getByText(/Earned/)).toBeVisible();
+  // first call for a new member: free trial countdown on both sides, host told earnings start after it
+  await expect(page.locator('.call').getByText(/Free ·/)).toBeVisible();
+  await expect(h.page.locator('.call').getByText(/earnings start after it ends/)).toBeVisible();
   await page.waitForTimeout(2500);
   await page.getByRole('button', { name: 'End call' }).click();
   await expect(page.getByText('Call ended')).toBeVisible();
   await expect(h.page.getByText('Call ended')).toBeVisible();
 
   const coinsAfter = (await (await page.request.get(`${APP.user}/api/me`)).json()).coins;
-  expect(coinsBefore - coinsAfter).toBe(30); // one started minute at the default video rate
+  expect(coinsBefore - coinsAfter).toBe(0); // ended inside the 30 s free trial
   const calls = await (await page.request.get(`${APP.user}/api/calls`)).json();
-  expect(calls[0]).toMatchObject({ status: 'ended', type: 'video', coins_charged: 30 });
+  expect(calls[0]).toMatchObject({ status: 'ended', type: 'video', coins_charged: 0 });
+  expect(calls[0].free_seconds).toBeGreaterThan(0);
+  const me = await (await page.request.get(`${APP.user}/api/me`)).json();
+  expect(me.free_trial.available).toBe(false); // used up
   // host is free again
   await expect(h.page.getByText("You're online", { exact: true })).toBeVisible();
   await h.context.close();
@@ -106,7 +110,7 @@ test('F02-E1 host declines: member told, nothing charged', async ({ browser, pag
   await a11y(page, 'friends: host profile');
   const before = (await (await page.request.get(`${APP.user}/api/me`)).json()).coins;
   await page.getByRole('button', { name: 'Audio call' }).click();
-  await h.page.getByRole('button', { name: 'Decline' }).click();
+  await h.page.getByRole('button', { name: 'Reject' }).click();
   await expect(page.getByText('Call declined')).toBeVisible();
   expect((await (await page.request.get(`${APP.user}/api/me`)).json()).coins).toBe(before);
   await h.context.close();
@@ -123,24 +127,77 @@ test('F08-H1 member reports the host; admin sees it and resolves', async ({ page
   expect(reports.find((r) => r.target_id === host.user.id && r.reason === 'Fake profile')).toBeTruthy();
 });
 
-test('F06-H1 / F06-N1 host requests a payout (validation first)', async ({ browser }) => {
+test('F06-H1 / F06-N1 host saves bank details, then withdrawal rules apply', async ({ browser }) => {
   const h = await personPage(browser, {});
   await apiLogin(h.context, 'host', host);
-  await h.page.goto(`${APP.host}/host/earnings`);
-  await a11y(h.page, 'host: earnings');
+  await h.page.goto(`${APP.host}/host/wallet`);
+  await a11y(h.page, 'host: wallet');
+  await expect(h.page.getByText("Today's income")).toBeVisible();
+  await expect(h.page.getByText('Total income')).toBeVisible();
+  await expect(h.page.getByRole('button', { name: 'Withdraw' })).toBeDisabled(); // no payout details yet
+  await h.page.getByRole('link', { name: /Add bank or UPI details/ }).click();
+  await a11y(h.page, 'host: bank details');
+  await h.page.getByRole('tab', { name: 'Bank account' }).click();
+  await h.page.getByLabel('Account holder name').fill('Hema Rao');
+  await h.page.getByLabel('Account number', { exact: true }).fill('123456789012');
+  await h.page.getByLabel('Confirm account number').fill('123456789000');
+  await h.page.getByLabel('IFSC code').fill('sbin0001234');
+  await h.page.getByRole('button', { name: 'Save' }).click();
+  await expect(h.page.getByText("Account numbers don't match")).toBeVisible();
+  await h.page.getByLabel('Confirm account number').fill('123456789012');
+  await h.page.getByRole('button', { name: 'Save' }).click();
+  await expect(h.page.getByText('Payout details saved')).toBeVisible();
+  await expect(h.page).toHaveURL(/\/host\/wallet$/);
+  await expect(h.page.getByText(/Bank ••••9012 · SBIN0001234/)).toBeVisible();
   const earned = (await (await h.page.request.get(`${APP.host}/api/host/stats`)).json()).profile.earnings;
   await h.page.getByLabel(/Coins/).fill('50');
-  await h.page.getByLabel('UPI ID').fill('hema@okbank');
-  await h.page.getByRole('button', { name: 'Request payout' }).click();
-  // the browser blocks amounts under the minimum before anything is sent
+  await h.page.getByRole('button', { name: 'Withdraw' }).click();
   expect(await h.page.getByLabel(/Coins/).evaluate((el) => el.validity.rangeUnderflow)).toBe(true);
-  // over the balance: the server refuses with a clear message
   await h.page.getByLabel(/Coins/).fill(String(Math.max(100, earned + 1000)));
-  await h.page.getByRole('button', { name: 'Request payout' }).click();
+  await h.page.getByRole('button', { name: 'Withdraw' }).click();
   await expect(h.page.getByText('Amount is more than your balance')).toBeVisible();
-  // a bad UPI ID is refused too
-  await h.page.getByLabel('UPI ID').fill('not a upi');
-  await h.page.getByRole('button', { name: 'Request payout' }).click();
-  await expect(h.page.getByText(/more than your balance|valid UPI/)).toBeVisible();
   await h.context.close();
 });
+
+test('Host home, history, profile menu and verification → admin verifies', async ({ browser, playwright }) => {
+  const h = await personPage(browser, {});
+  await apiLogin(h.context, 'host', host);
+  await h.page.goto(`${APP.host}/host`);
+  for (const t of ["Today's earnings", 'Total earnings', 'Total calls']) await expect(h.page.getByText(t, { exact: true })).toBeVisible();
+  await expect(h.page.getByRole('heading', { name: host.user.name })).toBeVisible();
+  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'History' }).click();
+  await a11y(h.page, 'host: history');
+  await expect(h.page.getByRole('tab', { name: 'Received' })).toBeVisible();
+  await expect(h.page.getByText(/^\+\d+$|^0$/).first()).toBeVisible(); // earned on the call from the earlier test (0 inside free trial)
+  await h.page.getByRole('tab', { name: 'Missed' }).click();
+  await expect(h.page.getByText('Rejected').first()).toBeVisible(); // the declined call
+  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Profile' }).click();
+  for (const t of ['Edit profile', 'Upload photo', 'Bank details', 'Verification', 'Language', 'Help & support', 'Log out']) {
+    await expect(h.page.locator('.p-menu .menu-row').filter({ hasText: t }).first(), t).toBeVisible();
+  }
+  await expect(h.page.locator('.p-head .verified')).toHaveCount(0); // no fake badge before verification
+  await h.page.locator('.p-menu .menu-row').filter({ hasText: 'Verification' }).click();
+  await a11y(h.page, 'host: verification');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const inputs = h.page.locator('input[type=file]');
+  await inputs.nth(0).setInputFiles({ name: 'id.png', mimeType: 'image/png', buffer: png });
+  await inputs.nth(1).setInputFiles({ name: 'me.png', mimeType: 'image/png', buffer: png });
+  await h.page.getByRole('button', { name: 'Submit for verification' }).click();
+  await expect(h.page.getByText('Under review')).toBeVisible();
+
+  const adminCtx = await personPage(browser, {});
+  await apiLogin(adminCtx.context, 'admin', { email: 'admin@milojulo.app', password: 'admin-pass-123' });
+  await adminCtx.page.goto(`${APP.admin}/admin/hosts`);
+  await adminCtx.page.getByRole('row').filter({ hasText: host.email }).getByRole('button', { name: 'Review ID' }).click();
+  await expect(adminCtx.page.getByRole('img', { name: 'ID document' })).toBeVisible();
+  await expect(adminCtx.page.getByRole('img', { name: 'Selfie' })).toBeVisible();
+  await adminCtx.page.getByRole('button', { name: 'Verify' }).click();
+  await expect(adminCtx.page.getByText(`${host.user.name} verified`)).toBeVisible();
+  await adminCtx.context.close();
+
+  await h.page.reload();
+  await expect(h.page.getByText('Verified', { exact: true })).toBeVisible();
+  await h.context.close();
+  void playwright;
+});
+

@@ -99,6 +99,8 @@ try {
   const A = (await signup({ email: 'boss@test.io', password: 'boss-pass-123' }, 'admin')).body;
   assert.equal(A.user.role, 'admin'); ok('admin account created only through the admin app');
   assert.equal((await req('/admin/seed-demo', { method: 'POST' }, A)).status, 200);
+  // the paid-call tests below assume no free trial; the free-trial block switches it on for its own checks
+  await req('/admin/settings', { method: 'PATCH', body: { free_trial_enabled: 0 } }, A);
 
   const U = await login('rahul@milojulo.app', DEMO, 'user');
   const H = await login('priya@milojulo.app', DEMO, 'host');
@@ -273,6 +275,104 @@ try {
   // ---------- push ----------
   const key = (await req('/push/key')).body.publicKey;
   assert.equal(Buffer.from(key, 'base64url').length, 65); ok('VAPID key generated (P-256)');
+
+  // ---------- free trial call ----------
+  await req('/admin/settings', { method: 'PATCH', body: { free_trial_enabled: 1, free_trial_seconds: 2 } }, A);
+  assert.equal((await req('/config')).body.freeTrial.seconds, 2);
+  const HT = (await signup({ name: 'Trial Host' }, 'host')).body;
+  await req(`/admin/hosts/${HT.user.id}`, { method: 'PATCH', body: { approved: true } }, A);
+  const hts = await sock(HT); await hts.ack('presence:set', { online: true });
+  const T1 = (await signup({ name: 'Trial One' }, 'user')).body;
+  assert.equal(T1.user.free_trial.available, true); assert.equal(T1.user.free_trial.seconds, 2); ok('new member has a free trial');
+  const t1s = await sock(T1);
+  // declining doesn't use the trial up
+  let tinc = hts.once('call:incoming');
+  let tr = await t1s.ack('call:start', { hostId: HT.user.id, type: 'video' });
+  assert.equal(tr.freeTrialMs, 2000); assert.equal((await tinc).freeTrialMs, 2000);
+  let tend = t1s.once('call:ended'); hts.emit('call:decline', { callId: tr.callId }); await tend;
+  assert.equal((await req('/me', {}, T1)).body.free_trial.available, true); ok('a declined call does not use up the free trial');
+  // accepted: free for 2 s, then the first paid minute
+  tinc = hts.once('call:incoming');
+  tr = await t1s.ack('call:start', { hostId: HT.user.id, type: 'video' }); await tinc;
+  const tconn = t1s.once('call:connected');
+  assert.ok((await hts.ack('call:accept', { callId: tr.callId })).ok);
+  assert.equal((await tconn).freeTrialMs, 2000);
+  await sleep(1200);
+  assert.equal((await req('/me', {}, T1)).body.coins, 50); ok('nothing charged during the free seconds');
+  assert.equal((await req('/host/stats', {}, HT)).body.profile.earnings, 0); ok('host earns nothing during the free seconds');
+  await sleep(1500);
+  assert.equal((await req('/me', {}, T1)).body.coins, 20); ok('billing starts when the free trial ends (first minute charged)');
+  tend = t1s.once('call:ended'); t1s.emit('call:end', { callId: tr.callId });
+  const tsum = await tend; assert.equal(tsum.status, 'ended'); assert.equal(tsum.charged, 30);
+  const tcalls = (await req('/calls', {}, HT)).body;
+  assert.equal(tcalls[0].free_seconds, 2); assert.equal(tcalls[0].earned, 15); ok('call records free seconds; host sees what they earned on it');
+  assert.equal((await req('/me', {}, T1)).body.free_trial.available, false);
+  tinc = hts.once('call:incoming');
+  tr = await t1s.ack('call:start', { hostId: HT.user.id, type: 'audio' }); await tinc;
+  assert.equal(tr.freeTrialMs, 0); ok('free trial is used only once per member');
+  tend = t1s.once('call:ended'); t1s.emit('call:end', { callId: tr.callId }); await tend;
+  // member with no coins: gets the free seconds, then the call ends
+  const T2 = (await signup({ name: 'Trial Broke' }, 'user')).body;
+  await req(`/admin/users/${T2.user.id}/credit`, { method: 'POST', body: { amount: -50 } }, A);
+  const t2s = await sock(T2);
+  tinc = hts.once('call:incoming');
+  tr = await t2s.ack('call:start', { hostId: HT.user.id, type: 'video' });
+  assert.ok(tr.callId, 'zero-coin member may start a free-trial call'); await tinc;
+  tend = t2s.once('call:ended'); await hts.ack('call:accept', { callId: tr.callId });
+  const t2sum = await tend;
+  assert.equal(t2sum.reason, 'trial_ended'); assert.equal(t2sum.charged, 0);
+  assert.equal((await req('/me', {}, T2)).body.coins, 0); ok('no coins: free seconds, then the call ends; balance never negative');
+  // switched off
+  await req('/admin/settings', { method: 'PATCH', body: { free_trial_enabled: 0 } }, A);
+  const T3 = (await signup({ name: 'Trial Off' }, 'user')).body;
+  assert.equal(T3.user.free_trial.available, false);
+  await req(`/admin/users/${T3.user.id}/credit`, { method: 'POST', body: { amount: -50 } }, A);
+  const t3s = await sock(T3);
+  assert.equal((await t3s.ack('call:start', { hostId: HT.user.id, type: 'video' })).code, 'LOW_BALANCE'); ok('free trial can be switched off by admin');
+  await req('/admin/settings', { method: 'PATCH', body: { free_trial_enabled: 1, free_trial_seconds: 30 } }, A);
+  assert.equal((await req('/admin/settings', { method: 'PATCH', body: { coin_to_inr: 0.5 } }, A)).body.coin_to_inr, 0.5); ok('decimal payout rate survives saving settings');
+
+  // ---------- host app: stats, payout details, withdrawals, verification ----------
+  const hst = (await req('/host/stats', {}, HT)).body;
+  assert.equal(hst.totalCalls, 2); assert.ok(hst.missedCalls >= 1); assert.equal(hst.profile.total_earned, 15); ok('host stats: total calls, missed calls, total earnings');
+  let pd = await req('/host/payouts', { method: 'POST', body: { amount: 100 } }, HT);
+  assert.match(pd.body.error, /bank or UPI details/); ok('withdrawal asks for payout details first');
+  pd = await req('/host/payout-details', { method: 'PUT', body: { method: 'bank', bank_holder: 'Trial Host', bank_account: '12345678901', bank_ifsc: 'BADIFSC' } }, HT);
+  assert.match(pd.body.error, /IFSC/); ok('bad IFSC refused');
+  pd = await req('/host/payout-details', { method: 'PUT', body: { method: 'bank', bank_holder: 'Trial Host', bank_account: '12345678901', bank_ifsc: 'sbin0001234' } }, HT);
+  assert.equal(pd.status, 200); assert.equal(pd.body.bank_account_last4, '8901'); assert.equal(pd.body.bank_account, undefined); assert.equal(pd.body.bank_ifsc, 'SBIN0001234');
+  const meHT = (await req('/me', {}, HT)).body.host;
+  assert.equal(meHT.bank_account, undefined); assert.equal(meHT.earn_remainder, undefined); ok('bank details saved; account number masked for the host');
+  assert.match((await req('/host/payouts', { method: 'POST', body: { amount: 100 } }, HT)).body.error, /more than your balance/); ok('withdrawal limited to balance');
+  // earn enough with a paid call (rate 30 → 15/min to host; ~7 minutes at 1 s each)
+  await req(`/admin/users/${T1.user.id}/credit`, { method: 'POST', body: { amount: 500 } }, A);
+  tinc = hts.once('call:incoming');
+  tr = await t1s.ack('call:start', { hostId: HT.user.id, type: 'video' }); await tinc;
+  await hts.ack('call:accept', { callId: tr.callId });
+  await sleep(6800);
+  tend = t1s.once('call:ended'); t1s.emit('call:end', { callId: tr.callId }); await tend;
+  const bal = (await req('/host/stats', {}, HT)).body.profile.earnings;
+  assert.ok(bal >= 100, `host balance ${bal}`);
+  assert.equal((await req('/host/payouts', { method: 'POST', body: { amount: 100 } }, HT)).status, 200);
+  const adminPayout = (await req('/admin/payouts', {}, A)).body.find((p) => p.host_id === HT.user.id);
+  assert.equal(adminPayout.destination.account, '12345678901'); assert.equal(adminPayout.destination.ifsc, 'SBIN0001234'); ok('withdrawal uses saved bank details; admin sees the full account to pay');
+  // verification
+  assert.equal((await req('/host/verification', {}, HT)).body.status, 'none');
+  const vpng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  let vfd = new FormData(); vfd.append('idType', 'aadhaar'); vfd.append('id', new Blob([vpng], { type: 'image/png' }), 'id.png');
+  assert.match((await req('/host/verification', { method: 'POST', form: vfd }, HT)).body.error, /selfie/); ok('verification needs both ID photo and selfie');
+  vfd = new FormData(); vfd.append('idType', 'aadhaar'); vfd.append('id', new Blob([vpng], { type: 'image/png' }), 'id.png'); vfd.append('selfie', new Blob([vpng], { type: 'image/png' }), 's.png');
+  assert.equal((await req('/host/verification', { method: 'POST', form: vfd }, HT)).body.status, 'pending'); ok('host submits ID + selfie for verification');
+  const doc = await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${A.token}`, 'x-mj-app': 'admin' } });
+  assert.equal(doc.status, 200); assert.equal(doc.headers.get('content-type'), 'image/png'); assert.match(doc.headers.get('cache-control'), /no-store/);
+  assert.ok([401, 403].includes((await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${HT.token}`, 'x-mj-app': 'host' } })).status));
+  assert.equal((await fetch(`${base}/uploads/${HT.user.id}`)).status, 404); ok('ID photos are private: admin can view, host session and public URLs cannot');
+  assert.equal((await req('/hosts', {}, U)).body.find((x) => x.id === HT.user.id)?.verified, 0);
+  await req(`/admin/hosts/${HT.user.id}`, { method: 'PATCH', body: { verification: 'verified' } }, A);
+  assert.equal((await req('/host/verification', {}, HT)).body.status, 'verified');
+  assert.equal((await req('/hosts', {}, U)).body.find((x) => x.id === HT.user.id)?.verified, 1);
+  assert.equal((await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${A.token}`, 'x-mj-app': 'admin' } })).status, 404); ok('admin verifies: members see the verified badge; ID photos are deleted after the decision');
+  for (const s of [hts, t1s, t2s, t3s]) s.close();
 
   // ---------- roles ----------
   assert.equal((await req('/admin/stats', {}, U)).status, 403);

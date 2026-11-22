@@ -115,13 +115,13 @@ export function CallProvider({ children }) {
     if (!socket) return;
     const onIncoming = (p) => {
       if (callRef.current.phase !== 'idle') { socket.emit('call:decline', { callId: p.callId }); return; }
-      setCall({ phase: 'incoming', callId: p.callId, type: p.type, rate: p.rate, peer: p.from });
+      setCall({ phase: 'incoming', callId: p.callId, type: p.type, rate: p.rate, peer: p.from, freeTrialMs: p.freeTrialMs || 0 });
       ringer.current.start('ring');
       if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
     };
     const onConnected = async (p) => {
       ringer.current.stop();
-      setCall((c) => ({ ...c, phase: 'active', startedAt: Date.now(), media: 'connecting', role: p.role }));
+      setCall((c) => ({ ...c, phase: 'active', startedAt: Date.now(), media: 'connecting', role: p.role, freeUntil: p.freeTrialMs ? Date.now() + p.freeTrialMs : 0 }));
       const peer = await createPeer();
       const queued = pending.current; pending.current = [];
       queued.forEach((d) => handleSignal(d));
@@ -136,7 +136,7 @@ export function CallProvider({ children }) {
       if (callRef.current.callId !== s.callId) return;
       cleanup();
       const msg = {
-        declined: 'Call declined', no_answer: 'No answer', balance: 'Call ended — not enough coins',
+        declined: 'Call declined', no_answer: 'No answer', balance: 'Call ended — not enough coins', trial_ended: 'Free trial ended — add coins to keep talking',
         disconnected: 'Call dropped', failed: 'Call failed to connect', cancelled: 'Call cancelled',
       }[s.reason];
       setCall((c) => ({ ...c, phase: 'ended', summary: { ...s, message: msg || 'Call ended' } }));
@@ -177,7 +177,7 @@ export function CallProvider({ children }) {
       toast(res.error, 'error');
       return res;
     }
-    setCall({ phase: 'outgoing', callId: res.callId, type, rate: res.rate, peer: res.host, status: 'Ringing…' });
+    setCall({ phase: 'outgoing', callId: res.callId, type, rate: res.rate, peer: res.host, status: 'Ringing…', freeTrialMs: res.freeTrialMs || 0 });
     ringer.current.start('back');
     return res;
   };

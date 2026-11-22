@@ -80,7 +80,7 @@ test('F05-H1 host signs up on the host app and waits for approval', async ({ pag
   await fillSignup(page, { name: 'Host Hema', email: `qa+hh${uniq()}@example.com` });
   await page.getByRole('button', { name: 'Apply as host' }).click();
   await expect(page).toHaveURL(/\/host$/);
-  await expect(page.getByText(/Waiting for approval/i)).toBeVisible();
+  await expect(page.getByText(/Waiting for approval/i).first()).toBeVisible();
   await a11y(page, 'host: home (pending)');
 });
 

@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { COIN_PACKS, publicUser } from './db.js';
+import { COIN_PACKS, publicUser, safeHost } from './db.js';
 import { hashPassword, verifyPassword, signJwt, randomToken, randomHex, sha256Hex } from './crypto.js';
 import { vapidKeys } from './push.js';
 import { verifySupabaseGoogle, supabaseGoogleEnabled } from './supabase.js';
@@ -284,10 +284,11 @@ export function buildApi(h) {
     packs: COIN_PACKS,
     payments: razorpayEnabled(env) ? 'razorpay' : testPaymentsAllowed() ? 'test' : 'off',
     supabase: (await supabaseGoogleEnabled(env)) ? { url: env.SUPABASE_URL, key: env.SUPABASE_PUBLISHABLE_KEY } : null,
+    freeTrial: { enabled: h.setting('free_trial_enabled') === 1, seconds: h.setting('free_trial_seconds') },
   })));
 
   // ================= discover =================
-  const hostCols = `u.id, u.name, u.avatar, u.bio, u.gender, u.city, u.languages, u.last_seen_at, h.online, h.busy, h.audio_rate, h.video_rate`;
+  const hostCols = `u.id, u.name, u.avatar, u.bio, u.gender, u.city, u.languages, u.last_seen_at, h.online, h.busy, h.audio_rate, h.video_rate, (h.kyc_status = 'verified') AS verified`;
   const withPresence = (x) => ({ ...x, online: x.online && h.isOnline(x.id) ? 1 : 0 });
 
   app.get('/hosts', auth('user', 'admin'), R((c) => {
@@ -470,16 +471,21 @@ export function buildApi(h) {
     const u = c.get('user');
     const col = u.role === 'host' ? 'host_id' : 'user_id';
     const other = u.role === 'host' ? 'user_id' : 'host_id';
-    return db.prepare(`SELECT c.*, COALESCE(o.name, 'Deleted account') other_name, o.avatar other_avatar FROM calls c LEFT JOIN users o ON o.id = c.${other}
-      WHERE c.${col} = ? ORDER BY c.id DESC LIMIT 100`).all(u.id);
+    const earned = u.role === 'host'
+      ? ", (SELECT COALESCE(SUM(t.amount),0) FROM transactions t WHERE t.user_id = c.host_id AND t.kind = 'earning' AND t.ref = 'call:' || c.id) AS earned" : '';
+    return db.prepare(`SELECT c.*${earned}, COALESCE(o.name, 'Deleted account') other_name, o.avatar other_avatar FROM calls c LEFT JOIN users o ON o.id = c.${other}
+      WHERE c.${col} = ? ORDER BY c.id DESC LIMIT 200`).all(u.id);
   }));
 
   // ================= host =================
   app.get('/host/stats', auth('host'), R((c) => {
     const id = c.get('user').id;
     const calls = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(seconds),0) s FROM calls WHERE host_id = ? AND status = 'ended' AND date(created_at) = date('now')").get(id);
+    const all = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(seconds),0) s FROM calls WHERE host_id = ? AND status = 'ended'").get(id);
     return {
-      profile: db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id),
+      profile: safeHost(db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id)),
+      totalCalls: all.n, totalSeconds: all.s,
+      missedCalls: db.prepare("SELECT COUNT(*) n FROM calls WHERE host_id = ? AND status IN ('missed','declined')").get(id).n,
       today: db.prepare("SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE user_id = ? AND kind = 'earning' AND date(created_at) = date('now')").get(id).v,
       callsToday: calls.n, secondsToday: calls.s,
       payouts: db.prepare('SELECT * FROM payouts WHERE host_id = ? ORDER BY id DESC').all(id),
@@ -488,21 +494,77 @@ export function buildApi(h) {
     };
   }));
 
+  // Where payouts go: UPI or a bank account. The full account number is only ever shown to admins.
+  const payoutSchema = z.discriminatedUnion('method', [
+    z.object({ method: z.literal('upi'), upi_id: z.string().trim().regex(/^[\w.-]{2,}@[a-zA-Z]{2,}$/, 'Enter a valid UPI ID (like name@bank)').max(100) }),
+    z.object({
+      method: z.literal('bank'),
+      bank_holder: z.string().trim().min(2, 'Enter the account holder name').max(60, 'Name is too long'),
+      bank_account: z.string().trim().regex(/^\d{9,18}$/, 'Account number should be 9–18 digits'),
+      bank_ifsc: z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Enter a valid IFSC code (like SBIN0001234)'),
+    }),
+  ]);
+  const destinationOf = (hp) => (hp.payout_method === 'upi'
+    ? { method: 'upi', upi_id: hp.upi_id, label: `UPI ${hp.upi_id}` }
+    : hp.payout_method === 'bank'
+      ? { method: 'bank', holder: hp.bank_holder, account: hp.bank_account, ifsc: hp.bank_ifsc, label: `Bank ••••${String(hp.bank_account).slice(-4)} (${hp.bank_ifsc})` }
+      : null);
+
+  app.put('/host/payout-details', auth('host'), R(async (c) => {
+    const f = parse(payoutSchema, await body(c));
+    const id = c.get('user').id;
+    if (f.method === 'upi') db.prepare("UPDATE host_profiles SET payout_method = 'upi', upi_id = ?, bank_holder = NULL, bank_account = NULL, bank_ifsc = NULL WHERE user_id = ?").run(f.upi_id, id);
+    else db.prepare("UPDATE host_profiles SET payout_method = 'bank', upi_id = NULL, bank_holder = ?, bank_account = ?, bank_ifsc = ? WHERE user_id = ?").run(f.bank_holder, f.bank_account, f.bank_ifsc, id);
+    return safeHost(db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id));
+  }));
+
   app.post('/host/payouts', auth('host'), R(async (c) => {
     const b = await body(c);
     const amount = Math.floor(Number(b.amount));
-    const upi = String(b.upi || '').trim().slice(0, 100);
     const id = c.get('user').id;
-    const hp = db.prepare('SELECT earnings FROM host_profiles WHERE user_id = ?').get(id);
+    const hp = db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id);
     if (!amount || amount < 100) throw bad('Minimum payout is 100 coins');
+    const dest = destinationOf(hp);
+    if (!dest) throw bad('Add your bank or UPI details in Profile → Bank details first');
     if (amount > hp.earnings) throw bad('Amount is more than your balance');
-    if (!/^[\w.-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw bad('Enter a valid UPI ID (like name@bank)');
     db.transaction(() => {
       db.prepare('UPDATE host_profiles SET earnings = earnings - ? WHERE user_id = ?').run(amount, id);
-      db.prepare('INSERT INTO payouts (host_id, amount, upi) VALUES (?,?,?)').run(id, amount, upi);
-      db.prepare('INSERT INTO transactions (user_id, kind, amount, balance_after, note) VALUES (?,?,?,?,?)').run(id, 'payout', -amount, hp.earnings - amount, `Payout requested to ${upi}`);
+      db.prepare('INSERT INTO payouts (host_id, amount, upi, destination) VALUES (?,?,?,?)').run(id, amount, dest.label, JSON.stringify(dest));
+      db.prepare('INSERT INTO transactions (user_id, kind, amount, balance_after, note) VALUES (?,?,?,?,?)').run(id, 'payout', -amount, hp.earnings - amount, `Withdrawal to ${dest.label}`);
     })();
     return { ok: true };
+  }));
+
+  // Host verification: a photo of a government ID and a selfie. Stored privately; only admins can view them.
+  app.get('/host/verification', auth('host'), R((c) => {
+    const hp = db.prepare('SELECT kyc_status, kyc_id_type, kyc_note FROM host_profiles WHERE user_id = ?').get(c.get('user').id);
+    return { status: hp.kyc_status, idType: hp.kyc_id_type, note: hp.kyc_note };
+  }));
+  app.post('/host/verification', auth('host'), limit('upload', 20, 60), R(async (c) => {
+    const u = c.get('user');
+    const hp = db.prepare('SELECT kyc_status FROM host_profiles WHERE user_id = ?').get(u.id);
+    if (hp.kyc_status === 'verified') throw bad('You are already verified');
+    const form = await c.req.parseBody().catch(() => ({}));
+    const idType = String(form.idType || '');
+    if (!['aadhaar', 'pan', 'voter', 'passport', 'driving'].includes(idType)) throw bad('Choose your ID type');
+    const files = {};
+    for (const kind of ['id', 'selfie']) {
+      const f = form[kind];
+      if (!f || typeof f === 'string') throw bad(kind === 'id' ? 'Add a photo of your ID' : 'Add a selfie');
+      if (f.size > 3 * 1024 * 1024) throw bad('Each photo must be under 3 MB');
+      const buf = new Uint8Array(await f.arrayBuffer());
+      const type = sniffImage(buf);
+      if (!type) throw bad('Photos must be JPG, PNG or WebP');
+      files[kind] = { type, buf };
+    }
+    db.transaction(() => {
+      for (const [kind, f] of Object.entries(files)) {
+        db.prepare('INSERT INTO kyc_docs (host_id, kind, type, data) VALUES (?,?,?,?) ON CONFLICT(host_id, kind) DO UPDATE SET type = excluded.type, data = excluded.data, created_at = datetime(\'now\')')
+          .run(u.id, kind, f.type, f.buf.buffer);
+      }
+      db.prepare("UPDATE host_profiles SET kyc_status = 'pending', kyc_id_type = ?, kyc_note = NULL WHERE user_id = ?").run(idType, u.id);
+    })();
+    return { status: 'pending', idType };
   }));
 
   // ================= safety =================
@@ -573,10 +635,16 @@ export function buildApi(h) {
   }));
 
   A.get('/hosts', R(() => db.prepare(`SELECT u.id, u.name, u.email, u.avatar, u.gender, u.city, u.languages, u.status, u.created_at,
-      h.approved, h.online, h.busy, h.audio_rate, h.video_rate, h.earnings, h.total_earned,
+      h.approved, h.online, h.busy, h.audio_rate, h.video_rate, h.earnings, h.total_earned, h.kyc_status, h.kyc_id_type, h.kyc_note,
       (SELECT COUNT(*) FROM calls c WHERE c.host_id = u.id AND c.status='ended') calls,
       (SELECT COALESCE(SUM(seconds),0) FROM calls c WHERE c.host_id = u.id) seconds
-    FROM users u JOIN host_profiles h ON h.user_id = u.id ORDER BY h.approved ASC, u.id DESC`).all().map(withPresence)));
+    FROM users u JOIN host_profiles h ON h.user_id = u.id ORDER BY h.approved ASC, (h.kyc_status = 'pending') DESC, u.id DESC`).all().map(withPresence)));
+
+  A.get('/hosts/:id/verification/:kind', async (c) => {
+    const row = db.prepare('SELECT type, data FROM kyc_docs WHERE host_id = ? AND kind = ?').get(Number(c.req.param('id')), c.req.param('kind'));
+    if (!row) return c.json({ error: 'Not found' }, 404);
+    return new Response(row.data, { headers: { 'content-type': row.type, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
+  });
 
   A.post('/hosts', R(async (c) => {
     const f = parse(z.object({
@@ -598,7 +666,12 @@ export function buildApi(h) {
   A.patch('/hosts/:id', R(async (c) => {
     const id = Number(c.req.param('id'));
     if (!db.prepare('SELECT 1 FROM host_profiles WHERE user_id = ?').get(id)) throw bad('Host not found', 404);
-    const { approved, audio_rate, video_rate, status } = await body(c);
+    const { approved, audio_rate, video_rate, status, verification, note } = await body(c);
+    if (['verified', 'rejected'].includes(verification)) {
+      db.prepare('UPDATE host_profiles SET kyc_status = ?, kyc_note = ? WHERE user_id = ?').run(verification, verification === 'rejected' ? String(note || 'Please upload clearer photos').slice(0, 200) : null, id);
+      // once a decision is made the ID photos aren't needed any more (keep only the result)
+      if (verification === 'verified') db.prepare('DELETE FROM kyc_docs WHERE host_id = ?').run(id);
+    }
     if (approved !== undefined) db.prepare('UPDATE host_profiles SET approved = ? WHERE user_id = ?').run(approved ? 1 : 0, id);
     if (audio_rate !== undefined) db.prepare('UPDATE host_profiles SET audio_rate = ? WHERE user_id = ?').run(Math.min(100000, Math.max(0, Number(audio_rate) | 0)), id);
     if (video_rate !== undefined) db.prepare('UPDATE host_profiles SET video_rate = ? WHERE user_id = ?').run(Math.min(100000, Math.max(0, Number(video_rate) | 0)), id);
@@ -606,7 +679,7 @@ export function buildApi(h) {
       db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id);
       if (status === 'blocked') h.disconnectUser(id);
     }
-    h.emitTo(id, 'host:profile', db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id));
+    h.emitTo(id, 'host:profile', safeHost(db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id)));
     return { ok: true };
   }));
 
@@ -625,7 +698,11 @@ export function buildApi(h) {
   }));
 
   A.get('/payouts', R(() => db.prepare(`SELECT p.*, u.name host_name, u.email host_email FROM payouts p JOIN users u ON u.id = p.host_id
-    ORDER BY (p.status='pending') DESC, p.id DESC`).all().map((p) => ({ ...p, inr: +(p.amount * h.setting('coin_to_inr')).toFixed(2) }))));
+    ORDER BY (p.status='pending') DESC, p.id DESC`).all().map((p) => {
+      let destination = null;
+      try { destination = p.destination ? JSON.parse(p.destination) : null; } catch { /* old rows */ }
+      return { ...p, destination, inr: +(p.amount * h.setting('coin_to_inr')).toFixed(2) };
+    })));
   A.patch('/payouts/:id', R(async (c) => {
     const p = db.prepare('SELECT * FROM payouts WHERE id = ?').get(Number(c.req.param('id')));
     if (!p || p.status !== 'pending') throw bad('Payout is not pending');
@@ -647,7 +724,9 @@ export function buildApi(h) {
   A.patch('/settings', R(async (c) => {
     for (const [k, v] of Object.entries(await body(c))) {
       const n = Number(v);
-      if (Number.isFinite(n) && n >= 0 && !(k === 'host_share_pct' && n > 100)) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(String(n), k);
+      const ok = Number.isFinite(n) && n >= 0 && !(k === 'host_share_pct' && n > 100)
+        && !(k === 'free_trial_enabled' && n > 1) && !(k === 'free_trial_seconds' && n > 600);
+      if (ok) db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(String(k === 'coin_to_inr' ? n : Math.round(n)), k);
     }
     return allSettings();
   }));

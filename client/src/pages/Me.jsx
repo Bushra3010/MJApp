@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { useToast } from '../lib/toast.jsx';
@@ -9,7 +9,8 @@ import Coins from '../components/Coins.jsx';
 import { preparePhoto } from '../lib/image.js';
 
 export default function Me() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, logout } = useAuth();
+  const nav = useNavigate();
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const toast = useToast();
@@ -39,7 +40,7 @@ export default function Me() {
       <header className="p-head">
         <Link className="circle-btn" to={`${base}/settings`} aria-label="Settings"><Icon name="gear" size={18} /></Link>
         <div style={{ minWidth: 0 }}>
-          <h1>{user.name}{user.role === 'host' && <span className="verified"><Icon name="verified" size={20} /></span>}</h1>
+          <h1>{user.name}{user.role === 'host' && user.host?.kyc_status === 'verified' && <span className="verified" title="Verified"><Icon name="verified" size={20} /></span>}</h1>
           <small>{user.city || 'Add your city'}</small>
         </div>
         <button className="circle-btn" onClick={() => setEditing((v) => !v)} aria-label="Edit profile" aria-expanded={editing}><Icon name="edit" size={17} /></button>
@@ -68,8 +69,18 @@ export default function Me() {
           {user.role === 'user' && (
             <Link to="/app/wallet" className="menu-row"><span className="ic amber"><Icon name="wallet" size={20} /></span><span className="t">Wallet<small>Balance and coin history</small></span><Coins value={user.coins} /><Icon name="chevron" size={18} className="chev" /></Link>
           )}
-          <Link to={`${base}/calls`} className="menu-row"><span className="ic violet"><Icon name="history" size={20} /></span><span className="t">Call history<small>Every call you've made</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+          {user.role === 'host' ? (<>
+            <button type="button" onClick={() => setEditing(true)} className="menu-row"><span className="ic violet"><Icon name="edit" size={20} /></span><span className="t">Edit profile<small>Name, city, about you</small></span><Icon name="chevron" size={18} className="chev" /></button>
+            <button type="button" onClick={() => fileRef.current?.click()} className="menu-row"><span className="ic amber"><Icon name="camera" size={20} /></span><span className="t">Upload photo<small>A clear photo gets more calls</small></span><Icon name="chevron" size={18} className="chev" /></button>
+            <Link to="/host/bank" className="menu-row"><span className="ic green"><Icon name="cash" size={20} /></span><span className="t">Bank details<small>{user.host?.payout_method === 'upi' ? `UPI · ${user.host.upi_id}` : user.host?.payout_method === 'bank' ? `Bank ••••${user.host.bank_account_last4}` : 'Add where you get paid'}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/host/verification" className="menu-row"><span className="ic violet"><Icon name="verified" size={20} /></span><span className="t">Verification<small>{{ none: 'Not verified', pending: 'Under review', verified: 'Verified ✓', rejected: 'Not approved — try again' }[user.host?.kyc_status || 'none']}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/host/language" className="menu-row"><span className="ic amber"><Icon name="chat" size={20} /></span><span className="t">Language<small>{langs.join(', ') || 'Add languages you speak'}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/contact" className="menu-row"><span className="ic green"><Icon name="shield" size={20} /></span><span className="t">Help & support<small>Contact us, policies</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+          </>) : (
+            <Link to={`${base}/calls`} className="menu-row"><span className="ic violet"><Icon name="history" size={20} /></span><span className="t">Call history<small>Every call you've made</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+          )}
           <Link to={`${base}/settings`} className="menu-row"><span className="ic green"><Icon name="gear" size={20} /></span><span className="t">Settings & account<small>Notifications, password, privacy</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+          {user.role === 'host' && <button type="button" onClick={() => logout().then(() => nav('/'))} className="menu-row"><span className="ic red"><Icon name="logout" size={20} /></span><span className="t danger-text">Log out</span></button>}
         </div>
         <p className="faint" style={{ textAlign: 'center', display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}><Icon name="shield" size={14} />Your email is never shown to others</p>
       </div>

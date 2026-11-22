@@ -9,6 +9,22 @@ export default function AdminHosts() {
   const toast = useToast();
   const [rows, setRows] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [review, setReview] = useState(null); // { host, id, selfie } object URLs while reviewing verification
+  const openReview = async (h) => {
+    const get = async (kind) => {
+      const r = await fetch(`/api/admin/hosts/${h.id}/verification/${kind}`, { credentials: 'same-origin' });
+      return r.ok ? URL.createObjectURL(await r.blob()) : null;
+    };
+    setReview({ host: h, id: await get('id'), selfie: await get('selfie') });
+  };
+  const closeReview = () => { if (review) { [review.id, review.selfie].forEach((u) => u && URL.revokeObjectURL(u)); } setReview(null); };
+  const decide = async (verification) => {
+    const note = verification === 'rejected' ? prompt('Reason shown to the host', 'Photo is blurry — please upload a clearer one') : null;
+    if (verification === 'rejected' && note === null) return;
+    await patch(review.host, { verification, note }, verification === 'verified' ? `${review.host.name} verified` : 'Verification rejected');
+    closeReview();
+  };
+  const KYC = { none: ['—', 'chip-grey'], pending: ['Review', 'chip-amber'], verified: ['Verified', 'chip-green'], rejected: ['Rejected', 'chip-red'] };
   const [f, setF] = useState({ name: '', email: '', password: '', city: '', languages: 'Hindi,English', gender: 'female' });
   const load = () => api('/admin/hosts').then(setRows);
   useEffect(() => { load(); }, []);
@@ -28,12 +44,15 @@ export default function AdminHosts() {
       <div className="admin-top"><h1>Hosts</h1><div className="spacer" /><button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add host</button></div>
       {!rows ? <div className="spinner" /> : (
         <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
-          <thead><tr><th>Host</th><th>Status</th><th>Audio /min</th><th>Video /min</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
+          <thead><tr><th>Host</th><th>Status</th><th>Verification</th><th>Audio /min</th><th>Video /min</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
           <tbody>{rows.map((h) => (
             <tr key={h.id}>
               <td><div className="row"><Avatar src={h.avatar} name={h.name} size={34} online={!!h.online} busy={!!h.busy} /><div><b>{h.name}</b><div className="faint">{h.email}</div></div></div></td>
               <td>{!h.approved ? <span className="chip chip-amber">pending</span> : h.status === 'blocked' ? <span className="chip chip-red">blocked</span>
                 : h.busy ? <span className="chip chip-amber">on call</span> : h.online ? <span className="chip chip-green">online</span> : <span className="chip chip-grey">offline</span>}</td>
+              <td>{h.kyc_status === 'pending'
+                ? <button className="btn btn-sm btn-primary" onClick={() => openReview(h)}>Review ID</button>
+                : <span className={`chip ${(KYC[h.kyc_status] || KYC.none)[1]}`} title={h.kyc_note || ''}>{(KYC[h.kyc_status] || KYC.none)[0]}</span>}</td>
               <td><input className="rate-input" type="number" min={0} defaultValue={h.audio_rate} aria-label="Audio rate" onBlur={(e) => Number(e.target.value) !== h.audio_rate && patch(h, { audio_rate: e.target.value }, 'Audio rate saved')} /></td>
               <td><input className="rate-input" type="number" min={0} defaultValue={h.video_rate} aria-label="Video rate" onBlur={(e) => Number(e.target.value) !== h.video_rate && patch(h, { video_rate: e.target.value }, 'Video rate saved')} /></td>
               <td>{h.calls}</td>
@@ -48,6 +67,20 @@ export default function AdminHosts() {
             </tr>))}
             {rows.length === 0 && <tr><td colSpan={8} className="faint">No hosts yet</td></tr>}
           </tbody></table></div>
+      )}
+      {review && (
+        <Sheet title={`Verify ${review.host.name}`} onClose={closeReview}>
+          <p className="faint" style={{ marginBottom: 10 }}>ID type: <b>{review.host.kyc_id_type || '—'}</b>. Check the name and face match, and the ID looks genuine.</p>
+          <div className="kyc-grid" style={{ marginBottom: 14 }}>
+            <figure style={{ margin: 0 }}>{review.id ? <img src={review.id} alt="ID document" style={{ width: '100%', borderRadius: 10 }} /> : <p className="faint">No ID photo</p>}<figcaption className="faint">ID</figcaption></figure>
+            <figure style={{ margin: 0 }}>{review.selfie ? <img src={review.selfie} alt="Selfie" style={{ width: '100%', borderRadius: 10 }} /> : <p className="faint">No selfie</p>}<figcaption className="faint">Selfie</figcaption></figure>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => decide('rejected')}>Reject</button>
+            <button className="btn btn-green" style={{ flex: 1 }} onClick={() => decide('verified')}>Verify</button>
+          </div>
+          <p className="faint" style={{ marginTop: 10 }}>Photos are deleted automatically once the host is verified.</p>
+        </Sheet>
       )}
       {adding && (
         <Sheet title="Add a host" onClose={() => setAdding(false)}>

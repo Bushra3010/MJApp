@@ -1,7 +1,7 @@
 // The Hub Durable Object: one instance holds the database, every WebSocket, presence, live calls and billing.
 // Calls and timers are kept in SQLite and driven by the DO alarm, so nothing is lost if the object hibernates.
 import { DurableObject } from 'cloudflare:workers';
-import { makeDb, migrate, publicUser } from './db.js';
+import { makeDb, migrate, publicUser, safeHost } from './db.js';
 import { verifyJwt } from './crypto.js';
 import { vapidKeys, sendPush } from './push.js';
 import { buildApi } from './routes.js';
@@ -59,13 +59,20 @@ export class Hub extends DurableObject {
     out.google_linked = !!u.supabase_id;
     delete out.google_sub;
     delete out.supabase_id;
-    if (u.role === 'host') out.host = this.db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id);
+    if (u.role === 'host') out.host = safeHost(this.db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id));
+    if (u.role === 'user') out.free_trial = { available: this.freeTrialAvailable(u), seconds: this.setting('free_trial_seconds') };
+    delete out.free_trial_used_at;
     return out;
   }
 
   /** ADMIN_EMAILS is the source of truth for who may use the admin app. */
   isAdminEmail(email) {
     return (this.env.ADMIN_EMAILS || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean).includes(String(email || '').toLowerCase());
+  }
+
+  /** A member's first call starts with free seconds (once per member, if switched on in admin). */
+  freeTrialAvailable(u) {
+    return u.role === 'user' && !u.free_trial_used_at && this.setting('free_trial_enabled') === 1 && this.setting('free_trial_seconds') > 0;
   }
 
   /** The signed-in user for a request, only if their session was issued by this same app and matches their role. */
@@ -247,26 +254,34 @@ export class Hub extends DurableObject {
     if (!h.online || !this.isOnline(hostId)) return { error: `${h.name} is offline right now` };
     if (h.busy || db.prepare('SELECT 1 FROM live_calls WHERE host_id = ?').get(hostId)) return { error: `${h.name} is on another call. Try again in a bit.` };
     const rate = type === 'video' ? h.video_rate : h.audio_rate;
-    if (u.coins < rate) return { error: `You need at least ${rate} coins for a ${type} call`, code: 'LOW_BALANCE' };
+    const trialMs = this.freeTrialAvailable(u) ? this.setting('free_trial_seconds') * 1000 : 0;
+    if (u.coins < rate && !trialMs) return { error: `You need at least ${rate} coins for a ${type} call`, code: 'LOW_BALANCE' };
 
     const callId = Number(db.prepare('INSERT INTO calls (user_id, host_id, type, rate) VALUES (?,?,?,?)').run(u.id, hostId, type, rate).lastInsertRowid);
-    db.prepare(`INSERT INTO live_calls (id, user_id, host_id, type, rate, status, ring_deadline_ms, user_name, host_name)
-      VALUES (?,?,?,?,?, 'ringing', ?, ?, ?)`).run(callId, u.id, hostId, type, rate, Date.now() + RING_MS, u.name, h.name);
+    db.prepare(`INSERT INTO live_calls (id, user_id, host_id, type, rate, status, ring_deadline_ms, user_name, host_name, free_trial_ms)
+      VALUES (?,?,?,?,?, 'ringing', ?, ?, ?, ?)`).run(callId, u.id, hostId, type, rate, Date.now() + RING_MS, u.name, h.name, trialMs);
     this.setHostFlags(hostId, { busy: 1 });
-    this.emitTo(hostId, 'call:incoming', { callId, type, rate, from: { id: u.id, name: u.name, avatar: u.avatar } });
+    this.emitTo(hostId, 'call:incoming', { callId, type, rate, freeTrialMs: trialMs, from: { id: u.id, name: u.name, avatar: u.avatar } });
     this.pushTo(hostId, { title: `Incoming ${type} call`, body: `${u.name} is calling you`, url: '/host', tag: `call-${callId}`, call: true }, { urgency: 'high', ttl: 30 });
     this.scheduleAlarm();
-    return { ok: true, callId, rate, host: { id: hostId, name: h.name, avatar: h.avatar } };
+    return { ok: true, callId, rate, freeTrialMs: trialMs, host: { id: hostId, name: h.name, avatar: h.avatar } };
   }
 
   acceptCall(u, callId) {
     const c = this.db.prepare('SELECT * FROM live_calls WHERE id = ?').get(callId);
     if (!c || c.host_id !== u.id || c.status !== 'ringing') return { error: 'Call no longer available' };
     const now = Date.now();
-    this.db.prepare("UPDATE live_calls SET status = 'active', started_ms = ?, ring_deadline_ms = NULL, next_charge_ms = ? WHERE id = ?").run(now, now + this.minuteMs, c.id);
+    let trialMs = c.free_trial_ms || 0;
+    if (trialMs) {
+      // claim the trial now (once per member); if it was used meanwhile, fall back to a paid call
+      const claimed = this.db.prepare("UPDATE users SET free_trial_used_at = datetime('now') WHERE id = ? AND free_trial_used_at IS NULL").run(c.user_id).changes;
+      if (!claimed) { trialMs = 0; this.db.prepare('UPDATE live_calls SET free_trial_ms = 0 WHERE id = ?').run(c.id); }
+    }
+    this.db.prepare("UPDATE live_calls SET status = 'active', started_ms = ?, ring_deadline_ms = NULL, next_charge_ms = ? WHERE id = ?")
+      .run(now, now + (trialMs || this.minuteMs), c.id);
     this.db.prepare("UPDATE calls SET status = 'active', started_at = datetime('now') WHERE id = ?").run(c.id);
-    if (!this.chargeMinute(c.id)) return { error: 'Caller has no coins' };
-    const payload = { callId: c.id, type: c.type, rate: c.rate, startedAt: now };
+    if (!trialMs && !this.chargeMinute(c.id)) return { error: 'Caller has no coins' };
+    const payload = { callId: c.id, type: c.type, rate: c.rate, startedAt: now, freeTrialMs: trialMs };
     this.emitTo(c.user_id, 'call:connected', { ...payload, role: 'caller' });
     this.emitTo(c.host_id, 'call:connected', { ...payload, role: 'callee' });
     this.scheduleAlarm();
@@ -281,7 +296,7 @@ export class Hub extends DurableObject {
     try {
       coins = this.moveCoins(c.user_id, -c.rate, 'call', `${c.type === 'video' ? 'Video' : 'Audio'} call minute ${c.minutes + 1}`, `call:${c.id}`);
     } catch {
-      this.endCall(c.id, 'balance');
+      this.endCall(c.id, c.minutes === 0 && c.free_trial_ms ? 'trial_ended' : 'balance');
       return false;
     }
     this.creditHost(c.host_id, c.rate, `${c.type === 'video' ? 'Video' : 'Audio'} call minute`, `call:${c.id}`);
@@ -302,7 +317,8 @@ export class Hub extends DurableObject {
     db.prepare('DELETE FROM live_calls WHERE id = ?').run(callId);
     const status = c.status === 'active' ? 'ended' : reason === 'declined' ? 'declined' : reason === 'failed' ? 'failed' : 'missed';
     const seconds = c.started_ms ? Math.round((Date.now() - c.started_ms) / 1000) : 0;
-    db.prepare("UPDATE calls SET status = ?, ended_at = datetime('now'), seconds = ?, coins_charged = ?, end_reason = ? WHERE id = ?").run(status, seconds, c.charged, reason, c.id);
+    const freeSeconds = c.free_trial_ms ? Math.min(seconds, Math.round(c.free_trial_ms / 1000)) : 0;
+    db.prepare("UPDATE calls SET status = ?, ended_at = datetime('now'), seconds = ?, coins_charged = ?, end_reason = ?, free_seconds = ? WHERE id = ?").run(status, seconds, c.charged, reason, freeSeconds, c.id);
     this.setHostFlags(c.host_id, { busy: 0 });
 
     const label = c.type === 'video' ? 'Video call' : 'Audio call';
@@ -311,7 +327,7 @@ export class Hub extends DurableObject {
       db.prepare('INSERT OR IGNORE INTO conversations (user_id, host_id) VALUES (?, ?)').run(c.user_id, c.host_id);
       const conv = db.prepare('SELECT * FROM conversations WHERE user_id = ? AND host_id = ?').get(c.user_id, c.host_id);
       const id = db.prepare("INSERT INTO messages (conversation_id, sender_id, type, body) VALUES (?, ?, 'call', ?)")
-        .run(conv.id, c.user_id, status === 'ended' ? `${label} · ${mmss} · ${c.charged} coins` : `${label} · ${status}`).lastInsertRowid;
+        .run(conv.id, c.user_id, status === 'ended' ? `${label} · ${mmss} · ${c.charged ? `${c.charged} coins` : 'free trial'}` : `${label} · ${status}`).lastInsertRowid;
       db.prepare("UPDATE conversations SET last_message_at = datetime('now') WHERE id = ?").run(conv.id);
       const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
       this.emitTo(c.user_id, 'message:new', msg);

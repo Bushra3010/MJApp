@@ -20,7 +20,11 @@ import Me from './pages/Me.jsx';
 import CallHistory from './pages/CallHistory.jsx';
 import HostShell from './pages/host/HostShell.jsx';
 import HostHome from './pages/host/HostHome.jsx';
-import HostEarnings from './pages/host/HostEarnings.jsx';
+import HostWallet from './pages/host/HostWallet.jsx';
+import HostHistory from './pages/host/HostHistory.jsx';
+import HostBank from './pages/host/HostBank.jsx';
+import HostVerification from './pages/host/HostVerification.jsx';
+import HostLanguage from './pages/host/HostLanguage.jsx';
 import AdminLayout from './pages/admin/AdminLayout.jsx';
 import AdminDashboard from './pages/admin/AdminDashboard.jsx';
 import AdminUsers from './pages/admin/AdminUsers.jsx';
@@ -69,12 +73,17 @@ export default function App() {
           <Route path="/host" element={<Guard role="host"><HostShell /></Guard>}>
             <Route index element={<HostHome />} />
             <Route path="chats" element={<Chats />} />
-            <Route path="earnings" element={<HostEarnings />} />
+            <Route path="wallet" element={<HostWallet />} />
+            <Route path="earnings" element={<Navigate to="/host/wallet" replace />} />
+            <Route path="history" element={<HostHistory />} />
             <Route path="me" element={<Me />} />
             <Route path="calls" element={<CallHistory />} />
             <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="/host/chat/:id" element={<Guard role="host"><ChatThread /></Guard>} />
+          <Route path="/host/bank" element={<Guard role="host"><HostBank /></Guard>} />
+          <Route path="/host/verification" element={<Guard role="host"><HostVerification /></Guard>} />
+          <Route path="/host/language" element={<Guard role="host"><HostLanguage /></Guard>} />
         </>}
 
         {APP === 'admin' && (

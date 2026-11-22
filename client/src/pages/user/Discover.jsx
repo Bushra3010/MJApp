@@ -92,7 +92,7 @@ export default function Discover() {
             <span className="rate-chip coin">{h.video_rate}/min</span>
             {n > 1 && <div className="prog"><span style={{ top: `${(idx % n) * (100 / n)}%`, height: `${100 / n}%` }} /></div>}
             <div className="info">
-              <h2>{h.name}{avail && <span className="live" />}</h2>
+              <h2>{h.name}{!!h.verified && <span className="verified" title="Verified host"><Icon name="verified" size={18} /></span>}{avail && <span className="live" />}</h2>
               <p>{[h.city, h.languages.split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · ')}</p>
             </div>
           </div>
@@ -101,6 +101,7 @@ export default function Discover() {
             <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label={`Chat with ${h.name}`}><Icon name="chat" size={26} fill /></button>
             <button className="act green" onClick={() => call('video')} disabled={!avail} aria-label={`Video call ${h.name}`}><Icon name="video" size={27} fill /></button>
           </div>
+          {user?.free_trial?.available && <p style={{ textAlign: 'center', marginTop: 10 }}><span className="trial-chip">🎁 Your first call is free for {user.free_trial.seconds} seconds</span></p>}
           <p className="swipe-hint">Swipe to see more · tap the card for profile</p>
         </>)}
       </div>

@@ -16,11 +16,13 @@ export default function AdminPayouts() {
       <h1>Payouts</h1>
       {!rows ? <div className="spinner" /> : (
         <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
-          <thead><tr><th>Requested</th><th>Host</th><th>Coins</th><th>Amount</th><th>UPI</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Requested</th><th>Host</th><th>Coins</th><th>Amount</th><th>Pay to</th><th>Status</th><th /></tr></thead>
           <tbody>{rows.map((p) => (
             <tr key={p.id}>
               <td className="muted">{timeAgo(p.created_at)}</td><td><b>{p.host_name}</b><div className="faint">{p.host_email}</div></td>
-              <td>{p.amount}</td><td><b>₹{p.inr}</b></td><td>{p.upi}</td>
+              <td>{p.amount}</td><td><b>₹{p.inr}</b></td><td>{p.destination?.method === 'bank'
+                ? <span><b>{p.destination.holder}</b><br />A/c {p.destination.account}<br />IFSC {p.destination.ifsc}</span>
+                : p.destination?.method === 'upi' ? <span>UPI <b>{p.destination.upi_id}</b></span> : p.upi}</td>
               <td><span className={`chip ${p.status === 'paid' ? 'chip-green' : p.status === 'rejected' ? 'chip-red' : 'chip-amber'}`}>{p.status}</span></td>
               <td>{p.status === 'pending' && <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                 <button className="btn btn-green btn-sm" onClick={() => act(p, 'paid')}>Mark paid</button>

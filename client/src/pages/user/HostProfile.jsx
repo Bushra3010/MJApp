@@ -14,7 +14,7 @@ export default function HostProfile() {
   const { id } = useParams();
   const [h, setH] = useState(null);
   const [menu, setMenu] = useState(false);
-  const { socket } = useAuth();
+  const { socket, user } = useAuth();
   const { startCall } = useCall();
   const nav = useNavigate();
   const toast = useToast();
@@ -35,7 +35,7 @@ export default function HostProfile() {
       <header className="p-head">
         <button className="circle-btn" onClick={() => nav(-1)} aria-label="Back"><Icon name="back" size={18} /></button>
         <div style={{ minWidth: 0 }}>
-          <h1>{h.name}<span className="verified" title="Verified host"><Icon name="verified" size={20} /></span></h1>
+          <h1>{h.name}{!!h.verified && <span className="verified" title="Verified host"><Icon name="verified" size={20} /></span>}</h1>
           <small>{h.city || 'India'}</small>
         </div>
         <button className="circle-btn" onClick={() => setMenu(true)} aria-label="More"><Icon name="more" size={18} /></button>
@@ -55,7 +55,9 @@ export default function HostProfile() {
           <span className="pill2"><Icon name="video" size={16} /> <Coins value={h.video_rate} /> /min</span>
           <span className="pill2">📞 {h.calls} {h.calls === 1 ? 'call' : 'calls'}</span>
         </div>
-        <p className="faint">You're charged per started minute. You'll see the coins spent live during the call.</p>
+        {user?.free_trial?.available
+          ? <p className="faint"><span className="trial-chip">🎁 First {user.free_trial.seconds} seconds of your first call are free</span><br />After that you're charged per started minute, shown live during the call.</p>
+          : <p className="faint">You're charged per started minute. You'll see the coins spent live during the call.</p>}
       </div>
       <div className="p-actions">
         <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label="Chat"><Icon name="chat" size={26} fill /></button>

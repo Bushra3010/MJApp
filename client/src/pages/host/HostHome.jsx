@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, mmss, timeAgo } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 import { emitAck } from '../../lib/socket.js';
 import { useToast } from '../../lib/toast.jsx';
-import TopBar from '../../components/TopBar.jsx';
 import Coins from '../../components/Coins.jsx';
 import Avatar from '../../components/Avatar.jsx';
 import Icon from '../../components/Icon.jsx';
@@ -43,14 +43,24 @@ export default function HostHome() {
     if (res.online && pushSupported() && Notification.permission === 'default') enablePush().catch(() => {});
   };
 
+  const status = !host.approved ? { t: 'Waiting for approval', c: 'pending' }
+    : !online ? { t: 'Offline', c: 'off' } : host.busy ? { t: 'On a call', c: 'busy' } : { t: 'Available for calls', c: 'on' };
+
   return (
     <>
-      <TopBar title={`Hi, ${user.name}`} right={<span className="chip chip-green" style={{ fontSize: 14, padding: '6px 12px' }}><Coins value={host.earnings} /></span>} />
+      <header className="h-head">
+        <Link to="/host/me" aria-label="Your profile"><Avatar src={user.avatar} name={user.name} size={52} online={host.approved ? online : undefined} busy={!!host.busy} /></Link>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h1 className="h-name">{user.name}{host.kyc_status === 'verified' && <span className="verified" title="Verified"><Icon name="verified" size={18} /></span>}</h1>
+          <span className={`h-status ${status.c}`}><i />{status.t}</span>
+        </div>
+        <Link to="/host/wallet" className="chip chip-green" style={{ fontSize: 14, padding: '6px 12px' }} aria-label={`Wallet: ${host.earnings} coins`}><Coins value={host.earnings} /></Link>
+      </header>
       <div className="page">
         {!host.approved ? (
           <div className="card pending-card">
             <b>⏳ Waiting for approval</b>
-            <p className="muted" style={{ marginTop: 4 }}>Our team reviews every host. You'll be able to go online once approved. Meanwhile, complete your profile in Me.</p>
+            <p className="muted" style={{ marginTop: 4 }}>Our team reviews every host. You'll be able to go online once approved. Meanwhile, add your photo, bank details and verification in Profile.</p>
           </div>
         ) : (
           <button className={`card online-card ${online ? 'on' : ''}`} onClick={toggle} style={{ width: '100%', textAlign: 'left' }} aria-pressed={online}>
@@ -61,20 +71,22 @@ export default function HostHome() {
             <span className={`switch ${online ? 'on' : ''}`} />
           </button>
         )}
-        <div className="stat-row">
-          <div className="card stat"><b><Coins value={stats?.today ?? 0} /></b><span>Earned today</span></div>
+        <div className="h-stats">
+          <div className="card stat"><b><Coins value={stats?.today ?? 0} /></b><span>Today's earnings</span></div>
+          <div className="card stat"><b><Coins value={host.total_earned ?? 0} /></b><span>Total earnings</span></div>
+          <div className="card stat"><b>{stats?.totalCalls ?? 0}</b><span>Total calls</span></div>
           <div className="card stat"><b>{stats?.callsToday ?? 0}</b><span>Calls today</span></div>
-          <div className="card stat"><b>{Math.round((stats?.secondsToday ?? 0) / 60)}</b><span>Minutes</span></div>
         </div>
         <div className="row" style={{ gap: 8 }}>
           <div className="card rate" style={{ flex: 1, padding: 12 }}><span className="faint">Audio rate</span><b><Coins value={host.audio_rate} />/min</b></div>
           <div className="card rate" style={{ flex: 1, padding: 12 }}><span className="faint">Video rate</span><b><Coins value={host.video_rate} />/min</b></div>
         </div>
-        <div className="section-title">Recent calls</div>
-        {calls.length === 0 ? <p className="faint">No calls yet. Go online and they'll start coming in.</p> : calls.slice(0, 10).map((c) => (
+        <div className="row" style={{ marginTop: 18 }}><div className="section-title" style={{ margin: 0 }}>Recent calls</div><div className="spacer" /><Link className="link" to="/host/history">See all</Link></div>
+        {calls.length === 0 ? <p className="faint" style={{ marginTop: 10 }}>No calls yet. Go online and they'll start coming in.</p> : calls.slice(0, 5).map((c) => (
           <div key={c.id} className="list-row">
             <Avatar src={c.other_avatar} name={c.other_name} size={44} />
             <div className="txt"><b>{c.other_name}</b><span><Icon name={c.type === 'video' ? 'video' : 'phone'} size={14} /> {c.status === 'ended' ? mmss(c.seconds) : c.status} · {timeAgo(c.created_at)}</span></div>
+            {c.earned > 0 && <span className="chip chip-green">+{c.earned}</span>}
           </div>
         ))}
       </div>

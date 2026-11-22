@@ -36,6 +36,7 @@ const PAGES = {
     <ul>
       <li><b>Account:</b> name, email, password (stored only as a secure hash), date of birth, gender, languages, city and bio if you add them, profile photo if you upload one.</li>
       <li><b>Activity:</b> messages, gifts, call times and durations, coin transactions, reports and blocks.</li>
+      <li><b>Hosts only:</b> payout details (UPI ID or bank account holder, number and IFSC) and, if you choose to get verified, a photo of a government ID and a selfie. ID photos are seen only by our verification team and deleted once a decision is made.</li>
       <li><b>Payments:</b> order and payment IDs and amounts. Card, UPI and bank details are handled by Razorpay and never reach us.</li>
       <li><b>Device:</b> push-notification tokens if you turn notifications on, and basic logs (IP address, browser) kept for security.</li>
     </ul>
