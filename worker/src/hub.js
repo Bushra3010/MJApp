@@ -63,6 +63,11 @@ export class Hub extends DurableObject {
     return out;
   }
 
+  /** ADMIN_EMAILS is the source of truth for who may use the admin app. */
+  isAdminEmail(email) {
+    return (this.env.ADMIN_EMAILS || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean).includes(String(email || '').toLowerCase());
+  }
+
   /** The signed-in user for a request, only if their session was issued by this same app and matches their role. */
   async userFor(req) {
     const app = appOf(req);
@@ -72,6 +77,7 @@ export class Hub extends DurableObject {
     if (!p || p.app !== app) return null;
     const u = this.db.prepare('SELECT * FROM users WHERE id = ?').get(p.id);
     if (!u || u.status === 'blocked' || u.role !== app || (u.token_version || 0) !== (p.tv || 0)) return null;
+    if (u.role === 'admin' && !this.isAdminEmail(u.email)) return null; // removed from ADMIN_EMAILS → admin access ends immediately
     return u;
   }
 

@@ -8,7 +8,8 @@
     "build": "npm --prefix client run build",
     "deploy": "npm --prefix worker run deploy",
     "test": "node tests/e2e.test.mjs",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test:admin": "node tests/admin-revoke.test.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

@@ -51,6 +51,7 @@ export function buildApi(h) {
   const APP_LABEL = { user: 'Milo Julo', host: 'Milo Julo Host', admin: 'Milo Julo Admin' };
   const startSession = async (c, u) => {
     const app = appOf(c.req.raw);
+    if (u.role === 'admin' && !h.isAdminEmail(u.email)) throw bad('Admin access for this account has been removed.', 403);
     if (u.role !== app) throw Object.assign(bad(`This is a ${u.role === 'user' ? 'member' : u.role} account. Please use the ${APP_LABEL[u.role]} app.`, 403), { extra: { code: 'WRONG_APP', role: u.role } });
     const token = await signJwt({ id: u.id, role: u.role, app, tv: u.token_version || 0 }, env.JWT_SECRET);
     setCookie(c, cookieName(app), token, { httpOnly: true, sameSite: 'Lax', secure: isHttps(c), maxAge: 30 * 24 * 3600, path: '/' });
