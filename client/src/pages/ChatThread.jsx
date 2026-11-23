@@ -41,7 +41,7 @@ export default function ChatThread() {
       if (m.sender_id !== user.id) api(`/conversations/${id}/messages?before=1`).then(() => window.dispatchEvent(new Event('mj:read')));
     };
     const onTyping = (p) => { if (p.conversationId === Number(id)) { setTyping(true); clearTimeout(t); t = setTimeout(() => setTyping(false), 2500); } };
-    const onStatus = (s) => setConv((c) => (c && c.host_id === s.id ? { ...c, host: { ...c.host, online: s.online, busy: s.busy } } : c));
+    const onStatus = (s) => s.online !== undefined && setConv((c) => (c && c.host_id === s.id ? { ...c, host: { ...c.host, online: s.online, busy: s.busy } } : c));
     socket.on('message:new', onMsg); socket.on('typing', onTyping); socket.on('host:status', onStatus);
     return () => { socket.off('message:new', onMsg); socket.off('typing', onTyping); socket.off('host:status', onStatus); };
   }, [socket, id, user.id]);

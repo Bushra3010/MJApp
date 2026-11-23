@@ -16,9 +16,9 @@ async function pair(browser, page, context) {
   const h = await personPage(browser, {});
   await apiLogin(h.context, 'host', host);
   await h.page.goto(`${APP.host}/host`);
-  const toggle = h.page.getByRole('button', { pressed: false }).filter({ hasText: "You're offline" });
+  const toggle = h.page.getByRole('button', { name: /Go Online/ });
   if (await toggle.count()) await toggle.click();
-  await expect(h.page.getByText("You're online", { exact: true })).toBeVisible();
+  await expect(h.page.getByText('You are online', { exact: true })).toBeVisible();
   return h;
 }
 
@@ -100,7 +100,7 @@ test('F02-H1 / F02-H2 / FT real video call: first call starts free, both see vid
   const me = await (await page.request.get(`${APP.user}/api/me`)).json();
   expect(me.free_trial.available).toBe(false); // used up
   // host is free again
-  await expect(h.page.getByText("You're online", { exact: true })).toBeVisible();
+  await expect(h.page.getByText('You are online', { exact: true })).toBeVisible();
   await h.context.close();
 });
 
@@ -159,22 +159,63 @@ test('F06-H1 / F06-N1 host saves bank details, then withdrawal rules apply', asy
   await h.context.close();
 });
 
-test('Host home, history, profile menu and verification → admin verifies', async ({ browser, playwright }) => {
+test('Host Home tabs, call rate, calls, alerts, leaderboard, invite, account menu, verification → admin verifies', async ({ browser }) => {
   const h = await personPage(browser, {});
   await apiLogin(h.context, 'host', host);
   await h.page.goto(`${APP.host}/host`);
-  for (const t of ["Today's earnings", 'Total earnings', 'Total calls']) await expect(h.page.getByText(t, { exact: true })).toBeVisible();
-  await expect(h.page.getByRole('heading', { name: host.user.name })).toBeVisible();
-  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'History' }).click();
-  await a11y(h.page, 'host: history');
-  await expect(h.page.getByRole('tab', { name: 'Received' })).toBeVisible();
-  await expect(h.page.getByText(/^\+\d+$|^0$/).first()).toBeVisible(); // earned on the call from the earlier test (0 inside free trial)
+  // My Page
+  await expect(h.page.getByRole('heading', { name: 'Home' })).toBeVisible();
+  await expect(h.page.getByRole('button', { name: /Go (Online|Offline)/ })).toBeVisible();
+  await expect(h.page.getByText('Which type of calls do you want to receive?')).toBeVisible();
+  await expect(h.page.getByText(/Time left: \d\d Days/)).toBeVisible();
+  await expect(h.page.getByText('Level progress')).toBeVisible();
+  // turning off video then back on
+  await h.page.getByRole('checkbox', { name: 'Video call' }).uncheck();
+  await expect.poll(async () => (await (await h.page.request.get(`${APP.host}/api/host/program`)).json()).acceptVideo).toBe(false);
+  await h.page.getByRole('checkbox', { name: 'Video call' }).check();
+  // Stats / Offers / Help videos
+  await h.page.getByRole('tab', { name: 'Stats' }).click();
+  for (const t of ["Today's earning", 'Today online', "Week's earning", 'Missed calls', 'Gift earning']) await expect(h.page.getByText(t).first()).toBeVisible();
+  await expect(h.page.getByText(/more to withdraw|You can withdraw now/)).toBeVisible();
+  await a11y(h.page, 'host: home stats');
+  await h.page.getByRole('tab', { name: 'Offers' }).click();
+  await expect(h.page.getByRole('heading', { name: 'Daily bonus' })).toBeVisible();
+  await expect(h.page.getByRole('heading', { name: /Invite hosts & earn 10%/ })).toBeVisible();
+  await a11y(h.page, 'host: home offers');
+  await h.page.getByRole('tab', { name: 'Help videos' }).click();
+  await expect(h.page.getByText('Select your language')).toBeVisible();
+  await a11y(h.page, 'host: home help');
+  // call rate: level 1 host can only pick tier 1
+  await h.page.getByRole('tab', { name: 'My Page' }).click();
+  await h.page.getByRole('link', { name: /My call rate/ }).click();
+  await a11y(h.page, 'host: call rate');
+  await h.page.getByRole('button', { name: 'Change call rate' }).click();
+  await expect(h.page.getByRole('button', { name: /★ 2/ })).toBeDisabled();
+  await h.page.getByRole('button', { name: /★ 1/ }).click();
+  await expect(h.page.getByText('Call rate updated')).toBeVisible();
+  await h.page.goBack();
+  // trophy → leaderboard
+  await h.page.getByRole('link', { name: "This week's leaderboard" }).click();
+  await expect(h.page.getByRole('heading', { name: "This week's top 10" })).toBeVisible();
+  await a11y(h.page, 'host: leaderboard');
+  await h.page.goBack();
+  // Calls (history) + Alerts
+  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Calls' }).click();
+  await expect(h.page.getByRole('tab', { name: 'Missed' })).toBeVisible();
   await h.page.getByRole('tab', { name: 'Missed' }).click();
-  await expect(h.page.getByText('Rejected').first()).toBeVisible(); // the declined call
-  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Profile' }).click();
-  for (const t of ['Edit profile', 'Upload photo', 'Bank details', 'Verification', 'Language', 'Help & support', 'Log out']) {
+  await expect(h.page.getByText('Rejected').first()).toBeVisible();
+  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Alerts' }).click();
+  await expect(h.page.getByRole('heading', { name: 'Alerts' })).toBeVisible();
+  await a11y(h.page, 'host: alerts');
+  // Account menu + invite
+  await h.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Account' }).click();
+  for (const t of ['Wallet', 'My call rate', 'Invite hosts & earn', 'Edit profile', 'Upload photo', 'Bank details', 'Verification', 'Language', 'Help & support', 'Log out']) {
     await expect(h.page.locator('.p-menu .menu-row').filter({ hasText: t }).first(), t).toBeVisible();
   }
+  await h.page.locator('.p-menu .menu-row').filter({ hasText: 'Invite hosts & earn' }).click();
+  await expect(h.page.getByText(/^[A-Z0-9]{6}$/)).toBeVisible();
+  await a11y(h.page, 'host: invite');
+  await h.page.goBack();
   await expect(h.page.locator('.p-head .verified')).toHaveCount(0); // no fake badge before verification
   await h.page.locator('.p-menu .menu-row').filter({ hasText: 'Verification' }).click();
   await a11y(h.page, 'host: verification');
@@ -198,6 +239,5 @@ test('Host home, history, profile menu and verification → admin verifies', asy
   await h.page.reload();
   await expect(h.page.getByText('Verified', { exact: true })).toBeVisible();
   await h.context.close();
-  void playwright;
 });
 

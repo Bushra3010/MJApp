@@ -13,25 +13,24 @@ test('F07 admin dashboard and every admin screen load without errors', async ({ 
   await adminPage(context, page);
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
   await a11y(page, 'admin: dashboard');
-  for (const [path, heading] of [['/admin/users', 'Users'], ['/admin/hosts', 'Hosts'], ['/admin/calls', 'Activity'], ['/admin/reports', 'Reports'], ['/admin/payouts', 'Payouts'], ['/admin/settings', 'Settings']]) {
+  for (const [path, heading] of [['/admin/users', 'Users'], ['/admin/hosts', 'Hosts'], ['/admin/calls', 'Activity'], ['/admin/reports', 'Reports'], ['/admin/payouts', 'Payouts'], ['/admin/content', 'Offers & videos'], ['/admin/settings', 'Settings']]) {
     await page.goto(`${APP.admin}${path}`);
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
     await a11y(page, `admin: ${heading.toLowerCase()}`);
   }
 });
 
-test('F07-H1 / F07-H2 admin approves a pending host and changes its video rate', async ({ page, context, request }) => {
+test('F07-H1 / F07-H2 admin approves a pending host and sets its level', async ({ page, context, request }) => {
   const h = await apiSignup(request, 'host', { name: `Pending ${Date.now().toString(36).slice(-4)}` });
   await adminPage(context, page, '/admin/hosts');
   const row = page.getByRole('row').filter({ hasText: h.email });
   await row.getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByText(`${h.user.name} approved`)).toBeVisible();
   await expect(row.getByRole('button', { name: 'Unapprove' })).toBeVisible();
-  await row.getByLabel('Video rate').fill('40');
-  await row.getByLabel('Video rate').blur();
-  await expect(page.getByText('Video rate saved')).toBeVisible();
+  await row.getByLabel('Level').selectOption('3');
+  await expect(page.getByText('Level set to 3')).toBeVisible();
   const hosts = await (await admin.get('/api/admin/hosts')).json();
-  expect(hosts.find((x) => x.id === h.user.id)).toMatchObject({ approved: 1, video_rate: 40 });
+  expect(hosts.find((x) => x.id === h.user.id)).toMatchObject({ approved: 1, level: 3, level_override: 3 });
 });
 
 test('F07-H3 admin adds coins and the member sees them live', async ({ browser, page, context, request }) => {

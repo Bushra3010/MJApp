@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { COIN_PACKS, publicUser, safeHost } from './db.js';
 import { hashPassword, verifyPassword, signJwt, randomToken, randomHex, sha256Hex } from './crypto.js';
 import { vapidKeys } from './push.js';
-import { verifySupabaseGoogle, supabaseGoogleEnabled } from './supabase.js';
+import { verifySupabaseSession, supabaseProviders } from './supabase.js';
+import { ensureLevel, applyRate, levelsTable, saveLevelsTable, tierOf, weekOf, dayOf, earningsBetween, onlineSecondsToday, addAlert, inviteCodeFor } from './host-program.js';
 import {
   razorpayEnabled, createRazorpayOrder, verifyCheckoutSignature, verifyWebhookSignature, sendEmail, iceServersFor,
 } from './services.js';
@@ -75,7 +76,14 @@ export function buildApi(h) {
     languages: z.string().regex(LANG_RE).default('Hindi,English'),
     birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter your date of birth'),
     acceptTerms: z.boolean({ message: 'Please accept the Terms and Privacy Policy' }).refine((v) => v === true, { message: 'Please accept the Terms and Privacy Policy' }),
+    refCode: z.string().trim().toUpperCase().max(12).optional(),
   });
+  /** New host: default rates, and the inviting host (if a valid invite code was used). */
+  const createHostProfile = (id, refCode) => {
+    const referrer = refCode ? db.prepare('SELECT user_id FROM host_profiles WHERE invite_code = ?').get(refCode) : null;
+    db.prepare('INSERT INTO host_profiles (user_id, audio_rate, video_rate, referrer_id) VALUES (?,?,?,?)').run(id, h.setting('default_audio_rate'), h.setting('default_video_rate'), referrer?.user_id ?? null);
+    if (referrer) addAlert(h, referrer.user_id, 'referral', 'A host joined with your invite 🎉', `You'll earn ${h.setting('referral_pct')}% of what they earn.`, '/host/invite');
+  };
   const age = (d) => {
     const b = new Date(d); const n = new Date();
     let a = n.getFullYear() - b.getFullYear();
@@ -94,7 +102,7 @@ export function buildApi(h) {
     const pw = await hashPassword(f.password);
     const id = db.prepare('INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date) VALUES (?,?,?,?,?,?,?)')
       .run(role, f.name, f.email, pw, f.gender, f.languages, f.birthDate).lastInsertRowid;
-    if (role === 'host') db.prepare('INSERT INTO host_profiles (user_id, audio_rate, video_rate) VALUES (?,?,?)').run(id, h.setting('default_audio_rate'), h.setting('default_video_rate'));
+    if (role === 'host') createHostProfile(id, f.refCode);
     if (role === 'user' && h.setting('signup_bonus') > 0) h.moveCoins(id, h.setting('signup_bonus'), 'bonus', 'Welcome bonus');
     const u = fresh(id);
     const token = await startSession(c, u);
@@ -118,30 +126,35 @@ export function buildApi(h) {
 
   // Sign in / sign up with Google via Supabase Auth. The app sends the Supabase access token; new people get
   // { needsProfile } first, then send it again with date of birth, languages and terms (the 18+ rule still applies).
-  app.post('/auth/google', limit('auth', 30, 15), R(async (c) => {
-    const b = parse(z.object({
-      accessToken: z.string().min(20).max(8000),
-      birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-      gender: z.enum(['', 'female', 'male', 'other']).default(''),
-      languages: z.string().regex(LANG_RE).default('Hindi,English'),
-      acceptTerms: z.boolean().optional(),
-    }), await body(c));
-    const g = await verifySupabaseGoogle(b.accessToken, env);
+  // Sign in / sign up with Google or phone OTP via Supabase Auth. The app sends the Supabase access token; new people
+  // get { needsProfile } first, then send it again with name (phone), date of birth, languages and terms (18+ rule applies).
+  const socialSchema = z.object({
+    accessToken: z.string().min(20).max(8000),
+    name: z.string().trim().max(40, 'Name can be up to 40 characters').optional(),
+    birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    gender: z.enum(['', 'female', 'male', 'other']).default(''),
+    languages: z.string().regex(LANG_RE).default('Hindi,English'),
+    acceptTerms: z.boolean().optional(),
+    refCode: z.string().trim().toUpperCase().max(12).optional(),
+  });
+  const socialSignIn = async (c, want) => {
+    const b = parse(socialSchema, await body(c));
+    const g = await verifySupabaseSession(b.accessToken, env, want);
     const app = appOf(c.req.raw);
 
     let u = db.prepare('SELECT * FROM users WHERE supabase_id = ?').get(g.id);
     if (!u) {
-      // Same verified email already registered with a password: link Google to that account.
-      u = db.prepare('SELECT * FROM users WHERE email = ?').get(g.email);
+      // Same verified email / phone already registered: link this sign-in method to that account.
+      u = g.email ? db.prepare('SELECT * FROM users WHERE email = ?').get(g.email) : db.prepare('SELECT * FROM users WHERE phone = ?').get(g.phone);
       if (u) {
-        if (u.supabase_id && u.supabase_id !== g.id) throw bad('This email is linked to a different Google account.', 409);
+        if (u.supabase_id && u.supabase_id !== g.id) throw bad(g.email ? 'This email is linked to a different Google account.' : 'This number is linked to a different account.', 409);
         db.prepare('UPDATE users SET supabase_id = ? WHERE id = ?').run(g.id, u.id);
         u = fresh(u.id);
       }
     }
     if (u) {
       if (u.status === 'blocked') throw bad('This account has been blocked. Contact support.', 403);
-      if (app === 'admin' && adminEmails().includes(u.email) && u.role !== 'admin') {
+      if (app === 'admin' && g.email && adminEmails().includes(u.email) && u.role !== 'admin') {
         db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(u.id);
         db.prepare('DELETE FROM host_profiles WHERE user_id = ?').run(u.id);
         u = fresh(u.id);
@@ -151,18 +164,25 @@ export function buildApi(h) {
     }
 
     // New account
-    if (app === 'admin' && !adminEmails().includes(g.email)) throw bad('Admin accounts can only be created for approved admin emails.', 403);
-    if (!b.birthDate || b.acceptTerms !== true) return { needsProfile: true, name: g.name, email: g.email };
+    if (app === 'admin' && !(g.email && adminEmails().includes(g.email))) throw bad('Admin accounts can only be created for approved admin emails.', 403);
+    const needsName = g.provider === 'phone';
+    if (!b.birthDate || b.acceptTerms !== true || (needsName && !(b.name && b.name.length >= 2))) {
+      return { needsProfile: true, needsName, name: g.name, email: g.email, phone: g.phone };
+    }
     if (Number.isNaN(Date.parse(b.birthDate)) || age(b.birthDate) < 18) throw bad('You must be 18 or older to use Milo Julo');
-    const name = ((g.name || '').trim().length >= 2 ? g.name.trim() : g.email.split('@')[0]).slice(0, 40);
-    const id = db.prepare("INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date, supabase_id) VALUES (?,?,?,'',?,?,?,?)")
-      .run(app, name, g.email, b.gender, b.languages, b.birthDate, g.id).lastInsertRowid;
-    if (app === 'host') db.prepare('INSERT INTO host_profiles (user_id, audio_rate, video_rate) VALUES (?,?,?)').run(id, h.setting('default_audio_rate'), h.setting('default_video_rate'));
+    const name = (needsName ? b.name : ((g.name || '').trim().length >= 2 ? g.name.trim() : g.email.split('@')[0])).slice(0, 40);
+    // phone-only accounts get an internal placeholder email (never shown or emailed)
+    const email = g.email || `${g.phone.replace(/\D/g, '')}@phone.milojulo.app`;
+    const id = db.prepare("INSERT INTO users (role, name, email, password_hash, gender, languages, birth_date, supabase_id, phone) VALUES (?,?,?,'',?,?,?,?,?)")
+      .run(app, name, email, b.gender, b.languages, b.birthDate, g.id, g.phone).lastInsertRowid;
+    if (app === 'host') createHostProfile(id, b.refCode);
     if (app === 'user' && h.setting('signup_bonus') > 0) h.moveCoins(id, h.setting('signup_bonus'), 'bonus', 'Welcome bonus');
     const nu = fresh(id);
     const token = await startSession(c, nu);
     return { user: h.me(nu), token, created: true };
-  }));
+  };
+  app.post('/auth/google', limit('auth', 30, 15), R((c) => socialSignIn(c, ['google'])));
+  app.post('/auth/phone', limit('auth', 30, 15), R((c) => socialSignIn(c, ['phone'])));
 
   app.post('/auth/logout', R((c) => { endSession(c); return { ok: true }; }));
 
@@ -283,12 +303,16 @@ export function buildApi(h) {
     chatCost: h.setting('chat_cost'),
     packs: COIN_PACKS,
     payments: razorpayEnabled(env) ? 'razorpay' : testPaymentsAllowed() ? 'test' : 'off',
-    supabase: (await supabaseGoogleEnabled(env)) ? { url: env.SUPABASE_URL, key: env.SUPABASE_PUBLISHABLE_KEY } : null,
+    ...(await (async () => {
+      const pv = await supabaseProviders(env);
+      const on = pv.google || pv.phone;
+      return { supabase: on ? { url: env.SUPABASE_URL, key: env.SUPABASE_PUBLISHABLE_KEY, google: pv.google, phone: pv.phone } : null };
+    })()),
     freeTrial: { enabled: h.setting('free_trial_enabled') === 1, seconds: h.setting('free_trial_seconds') },
   })));
 
   // ================= discover =================
-  const hostCols = `u.id, u.name, u.avatar, u.bio, u.gender, u.city, u.languages, u.last_seen_at, h.online, h.busy, h.audio_rate, h.video_rate, (h.kyc_status = 'verified') AS verified`;
+  const hostCols = `u.id, u.name, u.avatar, u.bio, u.gender, u.city, u.languages, u.last_seen_at, h.online, h.busy, h.audio_rate, h.video_rate, h.accept_audio, h.accept_video, (h.kyc_status = 'verified') AS verified`;
   const withPresence = (x) => ({ ...x, online: x.online && h.isOnline(x.id) ? 1 : 0 });
 
   app.get('/hosts', auth('user', 'admin'), R((c) => {
@@ -478,11 +502,88 @@ export function buildApi(h) {
   }));
 
   // ================= host =================
+  // Levels & call-rate tiers
+  const programme = (id) => {
+    const hp = ensureLevel(h, id);
+    const prof = db.prepare('SELECT level, rate_level, level_override, video_rate, audio_rate, accept_audio, accept_video FROM host_profiles WHERE user_id = ?').get(id);
+    const table = levelsTable(db);
+    const wk = weekOf();
+    const weekEarning = earningsBetween(db, id, wk.startMs, wk.endMs).total;
+    const next = table.find((t) => t.level === prof.level + 1) || null;
+    void hp;
+    return { levels: table, level: prof.level, rateLevel: prof.rate_level, overridden: !!prof.level_override,
+      videoRate: prof.video_rate, audioRate: prof.audio_rate, acceptAudio: !!prof.accept_audio, acceptVideo: !!prof.accept_video,
+      weekEarning, next, weekEndsAt: wk.endMs, now: Date.now() };
+  };
+  app.get('/host/program', auth('host'), R((c) => programme(c.get('user').id)));
+  app.put('/host/rate', auth('host'), R(async (c) => {
+    const { rateLevel } = parse(z.object({ rateLevel: z.number().int().min(1) }), await body(c));
+    const id = c.get('user').id;
+    const lvl = ensureLevel(h, id).level;
+    if (rateLevel > lvl) throw bad(`Reach Level ${rateLevel} to unlock this rate`, 403);
+    if (db.prepare('SELECT 1 FROM live_calls WHERE host_id = ?').get(id)) throw bad('You can change your rate after this call');
+    applyRate(h, id, rateLevel);
+    return programme(id);
+  }));
+  app.put('/host/call-types', auth('host'), R(async (c) => {
+    const { audio, video } = parse(z.object({ audio: z.boolean(), video: z.boolean() }), await body(c));
+    if (!audio && !video) throw bad('Keep at least one call type on');
+    db.prepare('UPDATE host_profiles SET accept_audio = ?, accept_video = ? WHERE user_id = ?').run(audio ? 1 : 0, video ? 1 : 0, c.get('user').id);
+    h.broadcast('host:status', { id: c.get('user').id, acceptAudio: audio ? 1 : 0, acceptVideo: video ? 1 : 0 });
+    return programme(c.get('user').id);
+  }));
+
+  // Weekly leaderboard (top 10 earners this week)
+  const leaderboard = (meId) => {
+    const wk = weekOf();
+    const sql = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+    const rows = db.prepare(`SELECT u.id, u.name, u.avatar, SUM(t.amount) AS earned FROM transactions t JOIN users u ON u.id = t.user_id
+      WHERE t.kind = 'earning' AND u.role = 'host' AND t.created_at >= ? AND t.created_at < ? GROUP BY u.id ORDER BY earned DESC LIMIT 50`).all(sql(wk.startMs), sql(wk.endMs));
+    const mine = rows.findIndex((r) => r.id === meId);
+    return { top: rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r, me: r.id === meId })), myRank: mine >= 0 ? mine + 1 : null,
+      myEarned: mine >= 0 ? rows[mine].earned : 0, weekEndsAt: wk.endMs };
+  };
+  app.get('/host/leaderboard', auth('host'), R((c) => leaderboard(c.get('user').id)));
+
+  app.get('/host/offers', auth('host'), R(() => db.prepare('SELECT id, title, body, tone FROM offers WHERE active = 1 ORDER BY sort, id').all()));
+  app.get('/host/help-videos', auth('host'), R((c) => {
+    const lang = c.req.query('lang');
+    const all = db.prepare('SELECT id, title, youtube_id, language FROM help_videos ORDER BY sort, id').all();
+    return { languages: [...new Set(all.map((v) => v.language))], videos: lang ? all.filter((v) => v.language === lang) : all };
+  }));
+
+  // Alerts feed
+  app.get('/host/alerts', auth('host'), R((c) => {
+    const id = c.get('user').id;
+    return { alerts: db.prepare('SELECT * FROM alerts WHERE user_id = ? ORDER BY id DESC LIMIT 100').all(id),
+      unread: db.prepare('SELECT COUNT(*) n FROM alerts WHERE user_id = ? AND read_at IS NULL').get(id).n };
+  }));
+  app.post('/host/alerts/read', auth('host'), R((c) => {
+    db.prepare("UPDATE alerts SET read_at = datetime('now') WHERE user_id = ? AND read_at IS NULL").run(c.get('user').id);
+    return { ok: true };
+  }));
+
+  // Invite hosts & earn
+  app.get('/host/invite', auth('host'), R((c) => {
+    const id = c.get('user').id;
+    const code = inviteCodeFor(h, id);
+    const invited = db.prepare('SELECT COUNT(*) n FROM host_profiles WHERE referrer_id = ?').get(id).n;
+    const earned = db.prepare("SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE user_id = ? AND kind = 'earning' AND note = 'Referral bonus'").get(id).v;
+    return { code, link: `${new URL(c.req.url).origin}/login?mode=signup&ref=${code}`, pct: h.setting('referral_pct'), invited, earned };
+  }));
+
   app.get('/host/stats', auth('host'), R((c) => {
     const id = c.get('user').id;
     const calls = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(seconds),0) s FROM calls WHERE host_id = ? AND status = 'ended' AND date(created_at) = date('now')").get(id);
     const all = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(seconds),0) s FROM calls WHERE host_id = ? AND status = 'ended'").get(id);
+    const d = dayOf(); const wk = weekOf();
+    const sqlT = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
     return {
+      todayBreakdown: earningsBetween(db, id, d.startMs, d.endMs),
+      weekBreakdown: earningsBetween(db, id, wk.startMs, wk.endMs),
+      onlineSecondsToday: onlineSecondsToday(h, id),
+      missedToday: db.prepare("SELECT COUNT(*) n FROM calls WHERE host_id = ? AND status IN ('missed','declined') AND created_at >= ?").get(id, sqlT(d.startMs)).n,
+      minWithdraw: h.setting('min_withdraw') || 100,
       profile: safeHost(db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id)),
       totalCalls: all.n, totalSeconds: all.s,
       missedCalls: db.prepare("SELECT COUNT(*) n FROM calls WHERE host_id = ? AND status IN ('missed','declined')").get(id).n,
@@ -523,7 +624,8 @@ export function buildApi(h) {
     const amount = Math.floor(Number(b.amount));
     const id = c.get('user').id;
     const hp = db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id);
-    if (!amount || amount < 100) throw bad('Minimum payout is 100 coins');
+    const minW = h.setting('min_withdraw') || 100;
+    if (!amount || amount < minW) throw bad(`Minimum withdrawal is ${minW} coins`);
     const dest = destinationOf(hp);
     if (!dest) throw bad('Add your bank or UPI details in Profile → Bank details first');
     if (amount > hp.earnings) throw bad('Amount is more than your balance');
@@ -635,7 +737,7 @@ export function buildApi(h) {
   }));
 
   A.get('/hosts', R(() => db.prepare(`SELECT u.id, u.name, u.email, u.avatar, u.gender, u.city, u.languages, u.status, u.created_at,
-      h.approved, h.online, h.busy, h.audio_rate, h.video_rate, h.earnings, h.total_earned, h.kyc_status, h.kyc_id_type, h.kyc_note,
+      h.approved, h.online, h.busy, h.audio_rate, h.video_rate, h.earnings, h.total_earned, h.kyc_status, h.kyc_id_type, h.kyc_note, h.level, h.rate_level, h.level_override,
       (SELECT COUNT(*) FROM calls c WHERE c.host_id = u.id AND c.status='ended') calls,
       (SELECT COALESCE(SUM(seconds),0) FROM calls c WHERE c.host_id = u.id) seconds
     FROM users u JOIN host_profiles h ON h.user_id = u.id ORDER BY h.approved ASC, (h.kyc_status = 'pending') DESC, u.id DESC`).all().map(withPresence)));
@@ -666,11 +768,23 @@ export function buildApi(h) {
   A.patch('/hosts/:id', R(async (c) => {
     const id = Number(c.req.param('id'));
     if (!db.prepare('SELECT 1 FROM host_profiles WHERE user_id = ?').get(id)) throw bad('Host not found', 404);
-    const { approved, audio_rate, video_rate, status, verification, note } = await body(c);
+    const { approved, audio_rate, video_rate, status, verification, note, level } = await body(c);
+    if (level !== undefined) {
+      // admin sets (or clears) a level override; it applies straight away
+      const lv = level === null || level === '' ? null : Math.max(1, Math.min(levelsTable(db).length, Number(level) | 0));
+      db.prepare('UPDATE host_profiles SET level_override = ? WHERE user_id = ?').run(lv, id);
+      if (lv) applyRate(h, id, lv, lv, weekOf().id);
+      else {
+        db.prepare("UPDATE host_profiles SET level_week = 'recalc' WHERE user_id = ?").run(id); // forces a normal weekly recalculation
+        ensureLevel(h, id);
+      }
+    }
     if (['verified', 'rejected'].includes(verification)) {
       db.prepare('UPDATE host_profiles SET kyc_status = ?, kyc_note = ? WHERE user_id = ?').run(verification, verification === 'rejected' ? String(note || 'Please upload clearer photos').slice(0, 200) : null, id);
       // once a decision is made the ID photos aren't needed any more (keep only the result)
       if (verification === 'verified') db.prepare('DELETE FROM kyc_docs WHERE host_id = ?').run(id);
+      addAlert(h, id, 'verification', verification === 'verified' ? 'You are verified ✓' : 'Verification not approved',
+        verification === 'verified' ? 'Members now see a verified badge on your profile.' : String(note || 'Please upload clearer photos'), '/host/verification');
     }
     if (approved !== undefined) db.prepare('UPDATE host_profiles SET approved = ? WHERE user_id = ?').run(approved ? 1 : 0, id);
     if (audio_rate !== undefined) db.prepare('UPDATE host_profiles SET audio_rate = ? WHERE user_id = ?').run(Math.min(100000, Math.max(0, Number(audio_rate) | 0)), id);
@@ -716,11 +830,68 @@ export function buildApi(h) {
         db.prepare('INSERT INTO transactions (user_id, kind, amount, balance_after, note) VALUES (?,?,?,?,?)').run(p.host_id, 'payout_reversed', p.amount, bal, 'Payout rejected — coins returned');
       }
     })();
+    addAlert(h, p.host_id, 'payout', status === 'paid' ? 'Withdrawal paid 💸' : 'Withdrawal rejected',
+      status === 'paid' ? `${p.amount} coins were sent to ${p.upi}.` : `${p.amount} coins were returned to your wallet.`, '/host/wallet');
     return { ok: true };
   }));
 
   const allSettings = () => Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map((s) => [s.key, Number(s.value)]));
   A.get('/settings', R(allSettings));
+
+  A.get('/levels', R(() => levelsTable(db)));
+  A.put('/levels', R(async (c) => {
+    const table = parse(z.array(z.object({
+      level: z.number().int().min(1).max(20), weekly: z.number().int().min(0),
+      video: z.number().int().min(0).max(100000), audio: z.number().int().min(0).max(100000),
+    })).min(1).max(20), await body(c));
+    table.sort((x, y) => x.level - y.level);
+    if (table[0].level !== 1 || table[0].weekly !== 0) throw bad('Level 1 must start at 0 weekly earnings');
+    if (table.some((t, i) => t.level !== i + 1)) throw bad('Levels must be numbered 1, 2, 3… without gaps');
+    if (table.some((t, i) => i && t.weekly <= table[i - 1].weekly)) throw bad('Each level needs higher weekly earnings than the one before');
+    saveLevelsTable(db, table);
+    // re-apply rates for every host with their current tier
+    for (const hp of db.prepare('SELECT user_id, level, rate_level FROM host_profiles').all()) applyRate(h, hp.user_id, Math.min(hp.rate_level, table.length), Math.min(hp.level, table.length));
+    return table;
+  }));
+
+  A.post('/hosts/:id/bonus', R(async (c) => {
+    const id = Number(c.req.param('id'));
+    const { amount, note } = parse(z.object({ amount: z.number().int().min(1).max(1000000), note: z.string().trim().max(80).default('Bonus') }), await body(c));
+    if (!db.prepare('SELECT 1 FROM host_profiles WHERE user_id = ?').get(id)) throw bad('Host not found', 404);
+    db.prepare('UPDATE host_profiles SET earnings = earnings + ?, total_earned = total_earned + ? WHERE user_id = ?').run(amount, amount, id);
+    const bal = db.prepare('SELECT earnings FROM host_profiles WHERE user_id = ?').get(id).earnings;
+    db.prepare("INSERT INTO transactions (user_id, kind, amount, balance_after, note, ref) VALUES (?, 'earning', ?, ?, ?, 'bonus')").run(id, amount, bal, note || 'Bonus');
+    addAlert(h, id, 'bonus', `Bonus: +${amount} coins 🎁`, note || 'Bonus', '/host/wallet');
+    h.emitTo(id, 'host:profile', safeHost(db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(id)));
+    return { ok: true, earnings: bal };
+  }));
+
+  A.get('/leaderboard', R(() => leaderboard(0)));
+
+  A.get('/offers', R(() => db.prepare('SELECT * FROM offers ORDER BY sort, id').all()));
+  A.post('/offers', R(async (c) => {
+    const f = parse(z.object({ title: z.string().trim().min(2).max(60), body: z.string().trim().min(2).max(300), tone: z.enum(['pink', 'gold', 'blue', 'green']).default('pink') }), await body(c));
+    return { id: db.prepare('INSERT INTO offers (title, body, tone, sort) VALUES (?,?,?, (SELECT COALESCE(MAX(sort),0)+1 FROM offers))').run(f.title, f.body, f.tone).lastInsertRowid };
+  }));
+  A.patch('/offers/:id', R(async (c) => {
+    const f = parse(z.object({ title: z.string().trim().min(2).max(60).optional(), body: z.string().trim().min(2).max(300).optional(), active: z.boolean().optional() }), await body(c));
+    for (const [k, v] of Object.entries(f)) db.prepare(`UPDATE offers SET ${k} = ? WHERE id = ?`).run(typeof v === 'boolean' ? (v ? 1 : 0) : v, Number(c.req.param('id')));
+    return { ok: true };
+  }));
+  A.delete('/offers/:id', R((c) => { db.prepare('DELETE FROM offers WHERE id = ?').run(Number(c.req.param('id'))); return { ok: true }; }));
+
+  const youtubeId = (url) => {
+    const m = String(url).match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/) || String(url).match(/^([\w-]{11})$/);
+    return m ? m[1] : null;
+  };
+  A.get('/help-videos', R(() => db.prepare('SELECT * FROM help_videos ORDER BY sort, id').all()));
+  A.post('/help-videos', R(async (c) => {
+    const f = parse(z.object({ title: z.string().trim().min(2).max(80), url: z.string().trim().min(5).max(200), language: z.string().trim().min(2).max(30) }), await body(c));
+    const vid = youtubeId(f.url);
+    if (!vid) throw bad('Paste a YouTube link (youtube.com/watch?v=… or youtu.be/…)');
+    return { id: db.prepare('INSERT INTO help_videos (title, youtube_id, language, sort) VALUES (?,?,?, (SELECT COALESCE(MAX(sort),0)+1 FROM help_videos))').run(f.title, vid, f.language).lastInsertRowid };
+  }));
+  A.delete('/help-videos/:id', R((c) => { db.prepare('DELETE FROM help_videos WHERE id = ?').run(Number(c.req.param('id'))); return { ok: true }; }));
   A.patch('/settings', R(async (c) => {
     for (const [k, v] of Object.entries(await body(c))) {
       const n = Number(v);

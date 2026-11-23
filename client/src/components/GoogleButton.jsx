@@ -11,10 +11,10 @@ const GLogo = () => (
   </svg>
 );
 
-export default function GoogleButton({ label = 'Continue with Google', onError }) {
+export default function GoogleButton({ label = 'Continue with Google', onError, divider = true }) {
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { supabaseConfig().then((c) => setReady(!!c)); }, []);
+  useEffect(() => { supabaseConfig().then((c) => setReady(!!c?.google)); }, []);
   if (!ready) return null;
   const go = async () => {
     setBusy(true);
@@ -22,7 +22,7 @@ export default function GoogleButton({ label = 'Continue with Google', onError }
   };
   return (
     <>
-      <div className="or-divider"><span>or</span></div>
+      {divider && <div className="or-divider"><span>or</span></div>}
       <button type="button" className="btn btn-google btn-block" onClick={go} disabled={busy}>
         <GLogo /> {busy ? 'Opening Google…' : label}
       </button>

@@ -5,6 +5,7 @@ import { makeDb, migrate, publicUser, safeHost } from './db.js';
 import { verifyJwt } from './crypto.js';
 import { vapidKeys, sendPush } from './push.js';
 import { buildApi } from './routes.js';
+import { ensureLevel, onlineStart, onlineStop, addAlert, creditReferrer } from './host-program.js';
 
 const RING_MS = 30_000;
 const OFFLINE_GRACE_MS = 8_000;
@@ -50,6 +51,7 @@ export class Hub extends DurableObject {
     this.db.prepare('UPDATE host_profiles SET earnings = earnings + ?, total_earned = total_earned + ? WHERE user_id = ?').run(earned, earned, hostId);
     const bal = this.db.prepare('SELECT earnings FROM host_profiles WHERE user_id = ?').get(hostId)?.earnings ?? 0;
     this.db.prepare('INSERT INTO transactions (user_id, kind, amount, balance_after, note, ref) VALUES (?,?,?,?,?,?)').run(hostId, 'earning', earned, bal, note, String(ref));
+    creditReferrer(this, hostId, earned);
     return earned;
   }
 
@@ -59,6 +61,7 @@ export class Hub extends DurableObject {
     out.google_linked = !!u.supabase_id;
     delete out.google_sub;
     delete out.supabase_id;
+    if (u.role === 'host') ensureLevel(this, u.id);
     if (u.role === 'host') out.host = safeHost(this.db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id));
     if (u.role === 'user') out.free_trial = { available: this.freeTrialAvailable(u), seconds: this.setting('free_trial_seconds') };
     delete out.free_trial_used_at;
@@ -203,6 +206,7 @@ export class Hub extends DurableObject {
         const hp = db.prepare('SELECT approved FROM host_profiles WHERE user_id = ?').get(u.id);
         if (d.online && !hp?.approved) return { error: 'Your profile is waiting for admin approval' };
         this.setHostFlags(u.id, { online: d.online ? 1 : 0 });
+        if (d.online) { ensureLevel(this, u.id); onlineStart(this, u.id); } else onlineStop(this, u.id);
         return { ok: true, online: d.online ? 1 : 0 };
       }
       case 'call:start': return this.startCall(u, Number(d.hostId), d.type);
@@ -248,7 +252,10 @@ export class Hub extends DurableObject {
     if (u.role !== 'user') return { error: 'Only users can start calls' };
     if (!['audio', 'video'].includes(type)) return { error: 'Bad call type' };
     if (db.prepare('SELECT 1 FROM live_calls WHERE user_id = ?').get(u.id)) return { error: 'You are already in a call' };
+    ensureLevel(this, hostId);
     const h = db.prepare('SELECT u.name, u.avatar, u.status, hp.* FROM users u JOIN host_profiles hp ON hp.user_id = u.id WHERE u.id = ?').get(hostId);
+    if (h && type === 'video' && !h.accept_video) return { error: `${h.name} isn't taking video calls right now. Try an audio call.` };
+    if (h && type === 'audio' && !h.accept_audio) return { error: `${h.name} isn't taking audio calls right now. Try a video call.` };
     if (!h || !h.approved || h.status !== 'active') return { error: 'Host not available' };
     if (db.prepare('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)').get(u.id, hostId, hostId, u.id)) return { error: 'Host not available' };
     if (!h.online || !this.isOnline(hostId)) return { error: `${h.name} is offline right now` };
@@ -335,6 +342,7 @@ export class Hub extends DurableObject {
     } catch { /* one side deleted their account */ }
     if (status === 'missed' && reason === 'no_answer') {
       this.pushTo(c.host_id, { title: 'Missed call', body: `You missed a ${c.type} call from ${c.user_name}`, url: '/host', tag: `call-${c.id}` });
+      addAlert(this, c.host_id, 'missed', 'Missed call', `You missed a ${c.type} call from ${c.user_name}`, '/host/calls');
     }
     const summary = { callId: c.id, status, reason, seconds, charged: c.charged };
     this.emitTo(c.user_id, 'call:ended', summary);
@@ -367,7 +375,7 @@ export class Hub extends DurableObject {
       if (t.kind === 'offline' && !this.isOnline(t.ref)) {
         for (const c of this.db.prepare('SELECT id FROM live_calls WHERE user_id = ? OR host_id = ?').all(t.ref, t.ref)) this.endCall(c.id, 'disconnected');
         const u = this.db.prepare('SELECT role FROM users WHERE id = ?').get(t.ref);
-        if (u?.role === 'host') this.setHostFlags(t.ref, { online: 0 });
+        if (u?.role === 'host') { this.setHostFlags(t.ref, { online: 0 }); onlineStop(this, t.ref); }
         this.db.prepare("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?").run(t.ref);
       }
     }

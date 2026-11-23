@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth.jsx';
 import { api } from '../lib/api.js';
 import LegalFooter from '../components/LegalFooter.jsx';
 import GoogleButton from '../components/GoogleButton.jsx';
+import PhoneLogin from '../components/PhoneLogin.jsx';
+import HostBanner from '../components/HostBanner.jsx';
+import { rememberRef, recallRef } from '../lib/supabaseAuth.js';
 import { APP, APP_NAME, APP_URL } from '../apps.js';
 
 const COPY = {
@@ -25,7 +28,9 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const { login, register, adopt } = useAuth();
   const location = useLocation();
-  const [google, setGoogle] = useState(location.state?.oauth || null); // { token, name, email } while finishing a Google sign-up
+  const [google, setGoogle] = useState(location.state?.oauth || null); // { token, provider, name, email, phone, needsName } while finishing a Google/phone sign-up
+  const refCode = params.get('ref') || recallRef();
+  useEffect(() => { if (params.get('ref')) rememberRef(params.get('ref')); }, []); // eslint-disable-line
   const nav = useNavigate();
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -40,22 +45,22 @@ export default function Login() {
       }
       const u = mode === 'login'
         ? await login(form.email, form.password)
-        : await register({ ...form, languages: form.languages.join(',') });
+        : await register({ ...form, languages: form.languages.join(','), ...(APP === 'host' && refCode ? { refCode } : {}) });
       nav({ user: '/app', host: '/host', admin: '/admin' }[APP], { replace: true });
     } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
   };
   const home = { user: '/app', host: '/host', admin: '/admin' }[APP];
-  const sendGoogle = async (accessToken, extra = {}) => {
+  const sendGoogle = async (accessToken, extra = {}, provider = google?.provider || 'google') => {
     setError(''); setWrongApp(null); setBusy(true);
     try {
-      const r = await api('/auth/google', { method: 'POST', body: { accessToken, ...extra } });
-      if (r.needsProfile) { setGoogle({ token: accessToken, name: r.name, email: r.email }); setMode('signup'); return; }
+      const r = await api(`/auth/${provider}`, { method: 'POST', body: { accessToken, ...(APP === 'host' && refCode ? { refCode } : {}), ...extra } });
+      if (r.needsProfile) { setGoogle({ token: accessToken, provider, name: r.name, email: r.email, phone: r.phone, needsName: r.needsName }); setMode('signup'); return; }
       adopt(r.user); nav(home, { replace: true });
     } catch (err) { setError(err.message); if (err.data?.code === 'WRONG_APP') setWrongApp(err.data.role); } finally { setBusy(false); }
   };
   const finishGoogle = (e) => {
     e.preventDefault();
-    sendGoogle(google.token, { birthDate: form.birthDate, gender: form.gender, languages: form.languages.join(','), acceptTerms: form.acceptTerms });
+    sendGoogle(google.token, { ...(google.needsName ? { name: form.name } : {}), birthDate: form.birthDate, gender: form.gender, languages: form.languages.join(','), acceptTerms: form.acceptTerms });
   };
   const toggleLang = (l) => setForm((f) => ({ ...f, languages: f.languages.includes(l) ? f.languages.filter((x) => x !== l) : [...f.languages, l] }));
 
@@ -66,7 +71,8 @@ export default function Login() {
         <form className="card auth-card" onSubmit={finishGoogle}>
           <h2 style={{ fontSize: 20, fontWeight: 900, marginBottom: 6 }}>Almost done</h2>
           <p className="muted" style={{ fontSize: 14, marginBottom: 14 }}>{APP === 'host' ? 'A few details for your host profile.' : 'A few details to finish your account.'}</p>
-          <div className="google-who"><span aria-hidden="true">G</span><div><b>{google.name || 'Google account'}</b><span className="faint">{google.email}</span></div></div>
+          <div className="google-who"><span aria-hidden="true">{google.provider === 'phone' ? '📱' : 'G'}</span><div><b>{google.provider === 'phone' ? 'Phone verified' : (google.name || 'Google account')}</b><span className="faint">{google.phone || google.email}</span></div></div>
+          {google.needsName && <div className="field"><label htmlFor="gname">Your name</label><input id="gname" className="input" value={form.name} onChange={set('name')} required minLength={2} maxLength={40} autoComplete="name" /></div>}
           <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
             <div className="field" style={{ flex: 1 }}><label htmlFor="gdob">Date of birth</label><input id="gdob" type="date" className="input" value={form.birthDate} onChange={set('birthDate')} max={maxDob()} required /></div>
             {APP !== 'admin' && <div className="field" style={{ flex: 1 }}><label htmlFor="ggender">Gender</label>
@@ -95,6 +101,16 @@ export default function Login() {
   return (
     <div className="landing">
       <Link to="/"><img className="logo" src="/logo.png" alt="Milo Julo" style={{ width: 140, marginBottom: 16 }} /></Link>
+      {APP === 'host' && mode !== 'forgot' && <HostBanner />}
+      {APP === 'host' && mode !== 'forgot' && (
+        <div className="card auth-card" style={{ marginBottom: 12 }}>
+          <PhoneLogin onToken={(t) => sendGoogle(t, {}, 'phone')} busy={busy} />
+          <GoogleButton label="Continue with Google" onError={setError} divider={false} />
+          {error && !google && <p className="error-text" style={{ marginTop: 10 }}>{error}</p>}
+          <p className="faint" style={{ marginTop: 12, textAlign: 'center' }}>By continuing you agree to our <Link className="link" to="/terms">Terms of Service</Link>, <Link className="link" to="/guidelines">Community Guidelines</Link> & <Link className="link" to="/privacy">Privacy Policy</Link>.</p>
+        </div>
+      )}
+      {APP === 'host' && mode !== 'forgot' && <div className="or-divider" style={{ width: '100%', maxWidth: 420 }}><span>or use email</span></div>}
       <form className="card auth-card" onSubmit={submit}>
         {APP !== 'user' && <p className="app-badge">{APP_NAME[APP]}</p>}
         {mode === 'forgot' ? (
@@ -141,7 +157,7 @@ export default function Login() {
         <button className="btn btn-primary btn-block" disabled={busy}>
           {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : mode === 'forgot' ? 'Send reset link' : COPY[APP].cta}
         </button>
-        {mode !== 'forgot' && <GoogleButton label={mode === 'signup' ? 'Sign up with Google' : 'Continue with Google'} onError={setError} />}
+        {mode !== 'forgot' && APP !== 'host' && <GoogleButton label={mode === 'signup' ? 'Sign up with Google' : 'Continue with Google'} onError={setError} />}
         {mode === 'login' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></p>}
         {mode === 'forgot' && <p style={{ textAlign: 'center', marginTop: 14 }}><button type="button" className="link" onClick={() => { setMode('login'); setInfo(''); }}>Back to log in</button></p>}
         {APP === 'admin' && mode === 'login' && <p className="faint" style={{ textAlign: 'center', marginTop: 10 }}>First time? <button type="button" className="link" onClick={() => { setMode('signup'); setError(''); }}>Set up the admin account</button></p>}

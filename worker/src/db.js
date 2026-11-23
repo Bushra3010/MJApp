@@ -184,6 +184,33 @@ const SCHEMA = [
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (host_id, kind)
   );`,
+  // v6 — host programme: levels & rate tiers, call types, online time, referrals, alerts, offers, help videos, phone login
+  `ALTER TABLE host_profiles ADD COLUMN level INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE host_profiles ADD COLUMN rate_level INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE host_profiles ADD COLUMN level_week TEXT;
+  ALTER TABLE host_profiles ADD COLUMN level_override INTEGER;
+  ALTER TABLE host_profiles ADD COLUMN accept_audio INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE host_profiles ADD COLUMN accept_video INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE host_profiles ADD COLUMN online_since_ms INTEGER;
+  ALTER TABLE host_profiles ADD COLUMN referrer_id INTEGER;
+  ALTER TABLE host_profiles ADD COLUMN invite_code TEXT;
+  ALTER TABLE host_profiles ADD COLUMN ref_remainder INTEGER NOT NULL DEFAULT 0;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_invite ON host_profiles(invite_code);
+  ALTER TABLE users ADD COLUMN phone TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+  CREATE TABLE IF NOT EXISTS online_log (host_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, day TEXT NOT NULL, seconds INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (host_id, day));
+  CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT DEFAULT '', url TEXT DEFAULT '',
+    read_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts(user_id, id);
+  CREATE TABLE IF NOT EXISTS offers (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, tone TEXT NOT NULL DEFAULT 'pink', active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0);
+  CREATE TABLE IF NOT EXISTS help_videos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, youtube_id TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'Hindi', sort INTEGER NOT NULL DEFAULT 0);
+  INSERT INTO offers (title, body, tone, sort) VALUES
+    ('Daily bonus', 'Stay online and take calls every day. Top daily performers get bonus coins — check Alerts for your bonus.', 'pink', 1),
+    ('Weekly bonus', 'The top 10 earners of the week win a bonus. Tap the trophy to see this week''s leaderboard.', 'gold', 2);`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -191,12 +218,14 @@ export const DEFAULT_SETTINGS = {
   default_audio_rate: '10', default_video_rate: '30', coin_to_inr: '0.5',
   free_trial_enabled: '1',   // first call for a new member starts with free seconds
   free_trial_seconds: '30',
+  referral_pct: '10',        // inviting host earns this % of their invitee's earnings (paid by the platform)
+  min_withdraw: '100',       // minimum coins per withdrawal
 };
 
 /** Host profile as the host (or the public) may see it: bank account number masked. */
 export function safeHost(hp) {
   if (!hp) return hp;
-  const { bank_account, earn_remainder, ...rest } = hp;
+  const { bank_account, earn_remainder, ref_remainder, online_since_ms, ...rest } = hp;
   return { ...rest, bank_account_last4: bank_account ? String(bank_account).slice(-4) : null };
 }
 

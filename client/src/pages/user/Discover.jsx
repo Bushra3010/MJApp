@@ -15,7 +15,9 @@ export function useHosts(params = '') {
   const [hosts, setHosts] = useState(null);
   useEffect(() => { api(`/hosts${params}`).then(setHosts).catch(() => setHosts([])); }, [params]);
   useEffect(() => {
-    const on = (s) => setHosts((hs) => hs?.map((h) => (h.id === s.id ? { ...h, online: s.online, busy: s.busy } : h)));
+    const on = (s) => setHosts((hs) => hs?.map((h) => (h.id !== s.id ? h : {
+      ...h, ...(s.online !== undefined ? { online: s.online, busy: s.busy } : {}),
+      ...(s.acceptAudio !== undefined ? { accept_audio: s.acceptAudio, accept_video: s.acceptVideo } : {}) })));
     socket?.on('host:status', on);
     return () => socket?.off('host:status', on);
   }, [socket]);
@@ -99,7 +101,7 @@ export default function Discover() {
           <div className="act-row">
             <button className="act red" onClick={() => go(1)} aria-label="Next person" disabled={n < 2}><Icon name="x" size={28} strokeWidth="2.6" /></button>
             <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label={`Chat with ${h.name}`}><Icon name="chat" size={26} fill /></button>
-            <button className="act green" onClick={() => call('video')} disabled={!avail} aria-label={`Video call ${h.name}`}><Icon name="video" size={27} fill /></button>
+            <button className="act green" onClick={() => call('video')} disabled={!avail || !h.accept_video} aria-label={`Video call ${h.name}`}><Icon name="video" size={27} fill /></button>
           </div>
           {user?.free_trial?.available && <p style={{ textAlign: 'center', marginTop: 10 }}><span className="trial-chip">🎁 Your first call is free for {user.free_trial.seconds} seconds</span></p>}
           <p className="swipe-hint">Swipe to see more · tap the card for profile</p>

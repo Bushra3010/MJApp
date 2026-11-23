@@ -372,6 +372,87 @@ try {
   assert.equal((await req('/host/verification', {}, HT)).body.status, 'verified');
   assert.equal((await req('/hosts', {}, U)).body.find((x) => x.id === HT.user.id)?.verified, 1);
   assert.equal((await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${A.token}`, 'x-mj-app': 'admin' } })).status, 404); ok('admin verifies: members see the verified badge; ID photos are deleted after the decision');
+
+  // ---------- host programme: levels, call rates, call types, stats, alerts, leaderboard, invites, offers, videos ----------
+  let prog = (await req('/host/program', {}, HT)).body;
+  assert.equal(prog.levels.length, 9); assert.equal(prog.level, 1); assert.ok(prog.weekEndsAt > Date.now()); ok('host has a level, the level table and the week countdown');
+  assert.equal((await req('/host/rate', { method: 'PUT', body: { rateLevel: 3 } }, HT)).status, 403); ok('locked rate tier cannot be chosen');
+  await req(`/admin/hosts/${HT.user.id}`, { method: 'PATCH', body: { level: 4 } }, A);
+  prog = (await req('/host/program', {}, HT)).body;
+  assert.equal(prog.level, 4); assert.equal(prog.overridden, true);
+  prog = (await req('/host/rate', { method: 'PUT', body: { rateLevel: 3 } }, HT)).body;
+  assert.equal(prog.rateLevel, 3); assert.equal(prog.videoRate, 50); assert.equal(prog.audioRate, 16); ok('admin can set a level; host picks a rate tier up to it');
+  assert.equal((await req(`/hosts/${HT.user.id}`, {}, U)).body.video_rate, 50); ok('members see the host\'s chosen rate');
+  await req(`/admin/hosts/${HT.user.id}`, { method: 'PATCH', body: { level: 5 } }, A);
+  prog = (await req('/host/program', {}, HT)).body;
+  assert.equal(prog.rateLevel, 5); assert.equal(prog.videoRate, 70); assert.equal(prog.audioRate, 22); ok('admin level change applies that level\'s rates (tier and rate always agree)');
+  const priya = (await req('/host/program', {}, H)).body;
+  assert.equal(priya.rateLevel, 0); assert.equal(priya.videoRate, 25); ok('hand-set rates from before levels are kept, shown as a custom rate');
+  await req(`/admin/hosts/${HT.user.id}`, { method: 'PATCH', body: { level: null } }, A);
+  assert.equal((await req('/host/call-types', { method: 'PUT', body: { audio: false, video: false } }, HT)).status, 400); ok('at least one call type must stay on');
+  await req('/host/call-types', { method: 'PUT', body: { audio: false, video: true } }, HT);
+  const hts2 = await sock(HT); await hts2.ack('presence:set', { online: true });
+  const t1s2 = await sock(T1);
+  assert.match((await t1s2.ack('call:start', { hostId: HT.user.id, type: 'audio' })).error, /isn't taking audio calls/); ok('host can switch off audio calls; members are told');
+  assert.equal((await req(`/hosts/${HT.user.id}`, {}, U)).body.accept_audio, 0);
+  await req('/host/call-types', { method: 'PUT', body: { audio: true, video: true } }, HT);
+  // earnings categories: a gift + an admin bonus
+  const convHT = (await req('/conversations', { method: 'POST', body: { hostId: HT.user.id } }, T1)).body;
+  await req(`/conversations/${convHT.id}/gift`, { method: 'POST', body: { giftId: 1 } }, T1); // Rose 10 → host 5
+  assert.equal((await req(`/admin/hosts/${HT.user.id}/bonus`, { method: 'POST', body: { amount: 40, note: 'Daily bonus' } }, A)).status, 200);
+  await sleep(1100);
+  const st = (await req('/host/stats', {}, HT)).body;
+  assert.ok(st.todayBreakdown.call > 0); assert.equal(st.todayBreakdown.gift, 5); assert.equal(st.todayBreakdown.other, 40);
+  assert.equal(st.weekBreakdown.total, st.todayBreakdown.total); assert.ok(st.onlineSecondsToday >= 1); assert.equal(st.minWithdraw, 100); ok('stats: call/gift/other earnings today and this week, time online today');
+  // alerts
+  let al = (await req('/host/alerts', {}, HT)).body;
+  assert.ok(al.alerts.some((a) => a.kind === 'bonus' && /\+40/.test(a.title))); assert.ok(al.alerts.some((a) => a.kind === 'verification')); assert.ok(al.unread >= 2);
+  await req('/host/alerts/read', { method: 'POST' }, HT);
+  assert.equal((await req('/host/alerts', {}, HT)).body.unread, 0); ok('alerts for bonus and verification; mark as read');
+  assert.ok((await req('/host/alerts', {}, H)).body.alerts.some((a) => a.kind === 'missed')); ok('missed calls create an alert');
+  // leaderboard
+  const lb = (await req('/host/leaderboard', {}, HT)).body;
+  assert.ok(lb.top.length >= 1 && lb.top.length <= 10); assert.ok(lb.myRank >= 1); assert.equal(lb.top.find((r) => r.me)?.id, HT.user.id); ok('weekly top-10 leaderboard with my rank');
+  // invites: 10% of what the invited host earns
+  const inv = (await req('/host/invite', {}, HT)).body;
+  assert.match(inv.code, /^[A-Z0-9]{6}$/); assert.match(inv.link, new RegExp(`ref=${inv.code}`)); assert.equal(inv.pct, 10);
+  const HI = (await signup({ name: 'Invited Host', refCode: inv.code.toLowerCase() }, 'host')).body;
+  await req(`/admin/hosts/${HI.user.id}`, { method: 'PATCH', body: { approved: true } }, A);
+  assert.ok((await req('/host/alerts', {}, HT)).body.alerts.some((a) => a.kind === 'referral')); ok('inviting host is told when someone joins with their code');
+  const refBefore = (await req('/host/stats', {}, HT)).body.profile.earnings;
+  const convHI = (await req('/conversations', { method: 'POST', body: { hostId: HI.user.id } }, T1)).body;
+  for (let i = 0; i < 4; i++) await req(`/conversations/${convHI.id}/gift`, { method: 'POST', body: { giftId: 1 } }, T1); // invitee earns 4 × 5 = 20
+  assert.equal((await req('/host/stats', {}, HI)).body.profile.earnings, 20);
+  assert.equal((await req('/host/stats', {}, HT)).body.profile.earnings - refBefore, 2);
+  assert.equal((await req('/host/invite', {}, HT)).body.invited, 1); ok('inviting host earns 10% on top (invitee keeps all of theirs)');
+  // offers & help videos
+  assert.equal((await req('/host/offers', {}, HT)).body.length, 2);
+  assert.equal((await req('/admin/offers', { method: 'POST', body: { title: 'Diwali special', body: 'Double bonus this week', tone: 'gold' } }, A)).status, 200);
+  assert.equal((await req('/host/offers', {}, HT)).body.length, 3); ok('admin-managed offers shown to hosts');
+  assert.equal((await req('/admin/help-videos', { method: 'POST', body: { title: 'App info', url: 'not a link', language: 'Marathi' } }, A)).status, 400);
+  await req('/admin/help-videos', { method: 'POST', body: { title: 'App माहिती', url: 'https://youtu.be/dQw4w9WgXcQ', language: 'Marathi' } }, A);
+  await req('/admin/help-videos', { method: 'POST', body: { title: 'How to earn more', url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ', language: 'Hindi' } }, A);
+  const hv = (await req('/host/help-videos?lang=Marathi', {}, HT)).body;
+  assert.deepEqual(hv.languages.sort(), ['Hindi', 'Marathi']); assert.equal(hv.videos.length, 1); assert.equal(hv.videos[0].youtube_id, 'dQw4w9WgXcQ'); ok('help videos by language (YouTube links)');
+  // levels table editing
+  assert.equal((await req('/admin/levels', { method: 'PUT', body: [{ level: 1, weekly: 0, video: 30, audio: 10 }, { level: 3, weekly: 10, video: 40, audio: 12 }] }, A)).status, 400); ok('level table must be numbered without gaps');
+  const nl = await req('/admin/levels', { method: 'PUT', body: [{ level: 1, weekly: 0, video: 35, audio: 12 }, { level: 2, weekly: 500, video: 45, audio: 15 }] }, A);
+  assert.equal(nl.status, 200); assert.equal((await req('/host/program', {}, HT)).body.levels.length, 2); ok('admin edits the level table');
+  await req('/admin/levels', { method: 'PUT', body: [
+    { level: 1, weekly: 0, video: 30, audio: 10 }, { level: 2, weekly: 500, video: 40, audio: 13 }, { level: 3, weekly: 1000, video: 50, audio: 16 },
+    { level: 4, weekly: 2000, video: 60, audio: 19 }, { level: 5, weekly: 3000, video: 70, audio: 22 }, { level: 6, weekly: 5000, video: 80, audio: 25 },
+    { level: 7, weekly: 10000, video: 90, audio: 28 }, { level: 8, weekly: 15000, video: 100, audio: 31 }, { level: 9, weekly: 20000, video: 120, audio: 35 }] }, A);
+  hts2.close(); t1s2.close();
+
+  // ---------- phone OTP sign-in (via Supabase) ----------
+  const ph = { sub: crypto.randomUUID(), provider: 'phone', phone: '919812345678', email: undefined, email_verified: undefined };
+  let pr = await req('/auth/phone', { method: 'POST', app: 'host', body: { accessToken: googleToken(ph) } });
+  assert.equal(pr.body.needsProfile, true); assert.equal(pr.body.needsName, true); assert.equal(pr.body.phone, '+919812345678'); ok('new phone user is asked for name, date of birth and terms');
+  pr = await req('/auth/phone', { method: 'POST', app: 'host', body: { accessToken: googleToken(ph), name: 'Pooja Patil', birthDate: '1997-07-07', acceptTerms: true, refCode: inv.code } });
+  assert.equal(pr.status, 200); assert.equal(pr.body.user.role, 'host'); assert.equal(pr.body.user.phone, '+919812345678'); assert.equal(pr.body.user.name, 'Pooja Patil'); ok('phone OTP sign-up creates a host (with invite code)');
+  assert.equal((await req('/auth/phone', { method: 'POST', app: 'host', body: { accessToken: googleToken(ph) } })).body.user?.name, 'Pooja Patil'); ok('returning phone user signs straight in');
+  assert.equal((await req('/auth/google', { method: 'POST', app: 'host', body: { accessToken: googleToken(ph) } })).status, 401); ok('a phone session is not accepted as a Google sign-in');
+  assert.equal((await req('/host/invite', {}, HT)).body.invited, 2);
   for (const s of [hts, t1s, t2s, t3s]) s.close();
 
   // ---------- roles ----------

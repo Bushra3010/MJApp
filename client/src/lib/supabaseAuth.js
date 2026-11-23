@@ -43,3 +43,34 @@ export async function finishGoogleSignIn(code) {
   if (!res.ok || !data.access_token) throw new Error(data.error_description || data.msg || 'Google sign-in failed. Please try again.');
   return data.access_token;
 }
+
+// ---------- phone OTP (Supabase Auth, SMS sent by the project's SMS provider) ----------
+/** Send a 6-digit code by SMS. `phone` in E.164 form, e.g. +919876543210. */
+export async function sendPhoneOtp(phone) {
+  const cfg = await supabaseConfig();
+  if (!cfg?.phone) throw new Error('Phone login is not available right now. Use Google or email.');
+  const res = await fetch(`${cfg.url}/auth/v1/otp`, {
+    method: 'POST', headers: { apikey: cfg.key, 'content-type': 'application/json' },
+    body: JSON.stringify({ phone, create_user: true }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.msg || d.error_description || 'Could not send the code. Check the number and try again.');
+  }
+}
+/** Check the code; returns a Supabase access token for the server. */
+export async function verifyPhoneOtp(phone, code) {
+  const cfg = await supabaseConfig();
+  const res = await fetch(`${cfg.url}/auth/v1/verify`, {
+    method: 'POST', headers: { apikey: cfg.key, 'content-type': 'application/json' },
+    body: JSON.stringify({ phone, token: code, type: 'sms' }),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || !d.access_token) throw new Error(d.msg || d.error_description || 'That code is wrong or has expired.');
+  return d.access_token;
+}
+
+// invite code from a host's invite link survives the trip to Google and back
+const REF_KEY = 'mj_ref';
+export const rememberRef = (code) => { try { if (code) sessionStorage.setItem(REF_KEY, code); } catch { /* */ } };
+export const recallRef = () => { try { return sessionStorage.getItem(REF_KEY) || undefined; } catch { return undefined; } };

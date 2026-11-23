@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
-import { finishGoogleSignIn } from '../lib/supabaseAuth.js';
+import { finishGoogleSignIn, recallRef } from '../lib/supabaseAuth.js';
 import { APP, APP_NAME, APP_URL } from '../apps.js';
 
 const HOME = { user: '/app', host: '/host', admin: '/admin' };
@@ -27,8 +27,9 @@ export default function AuthCallback() {
     (async () => {
       try {
         const accessToken = await finishGoogleSignIn(code);
-        const r = await api('/auth/google', { method: 'POST', body: { accessToken } });
-        if (r.needsProfile) { nav('/login?mode=signup', { replace: true, state: { oauth: { token: accessToken, name: r.name, email: r.email } } }); return; }
+        const refCode = APP === 'host' ? recallRef() : undefined;
+        const r = await api('/auth/google', { method: 'POST', body: { accessToken, ...(refCode ? { refCode } : {}) } });
+        if (r.needsProfile) { nav('/login?mode=signup', { replace: true, state: { oauth: { token: accessToken, provider: 'google', name: r.name, email: r.email } } }); return; }
         adopt(r.user);
         nav(HOME[APP], { replace: true });
       } catch (e) {

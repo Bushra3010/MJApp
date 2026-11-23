@@ -20,8 +20,11 @@ const ALGS = {
   RS256: { imp: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, ver: { name: 'RSASSA-PKCS1-v1_5' } },
 };
 
-/** Returns { id, email, name, avatar } for a valid Supabase access token from a Google sign-in, or throws a 401. */
-export async function verifySupabaseGoogle(token, env) {
+/**
+ * Verify a Supabase access token from a Google or phone-OTP sign-in.
+ * Returns { id, provider, email, phone, name, avatar } or throws a 401.
+ */
+export async function verifySupabaseSession(token, env, want = ['google', 'phone']) {
   if (!env.SUPABASE_URL) throw Object.assign(new Error('Google sign-in is not set up yet'), { status: 503 });
   const base = env.SUPABASE_URL.replace(/\/$/, '');
   const parts = String(token || '').split('.');
@@ -48,27 +51,33 @@ export async function verifySupabaseGoogle(token, env) {
   if (p.aud !== 'authenticated' && !(Array.isArray(p.aud) && p.aud.includes('authenticated'))) throw fail();
   if (!p.exp || p.exp < now - 30) throw fail('Your sign-in expired. Please try again.');
   const providers = p.app_metadata?.providers || [p.app_metadata?.provider];
-  if (!providers.includes('google')) throw fail('Please sign in with Google.');
   const meta = p.user_metadata || {};
-  if (!p.sub || !p.email || meta.email_verified === false) throw fail('Your Google email is not verified.');
-  return {
-    id: String(p.sub),
-    email: String(p.email).toLowerCase(),
-    name: String(meta.full_name || meta.name || '').slice(0, 40),
-    avatar: meta.avatar_url || meta.picture || '',
-  };
+  if (!p.sub) throw fail();
+  if (want.includes('google') && providers.includes('google')) {
+    if (!p.email || meta.email_verified === false) throw fail('Your Google email is not verified.');
+    return { id: String(p.sub), provider: 'google', email: String(p.email).toLowerCase(), phone: null,
+      name: String(meta.full_name || meta.name || '').slice(0, 40), avatar: meta.avatar_url || meta.picture || '' };
+  }
+  if (want.includes('phone') && providers.includes('phone')) {
+    const phone = String(p.phone || '').replace(/\D/g, '');
+    if (phone.length < 10) throw fail('Phone number could not be verified.');
+    return { id: String(p.sub), provider: 'phone', email: null, phone: `+${phone}`, name: '', avatar: '' };
+  }
+  throw fail(want.length === 1 && want[0] === 'google' ? 'Please sign in with Google.' : 'Please sign in with Google or your phone number.');
 }
+export const verifySupabaseGoogle = (token, env) => verifySupabaseSession(token, env, ['google']);
 
-/** Is the Google provider switched on in the Supabase project? Cached for a minute so the button appears by itself. */
-let enabledCache = { at: 0, value: false };
-export async function supabaseGoogleEnabled(env) {
-  if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) return false;
-  if (env.SUPABASE_JWKS_URL) return true; // local tests use a mock project
+/** Which sign-in methods are switched on in the Supabase project ({ google, phone }). Cached for a minute. */
+let enabledCache = { at: 0, value: { google: false, phone: false } };
+export async function supabaseProviders(env) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) return { google: false, phone: false };
+  if (env.SUPABASE_JWKS_URL) return { google: true, phone: true }; // local tests use a mock project
   if (Date.now() - enabledCache.at < 60_000) return enabledCache.value;
   try {
     const res = await fetch(`${env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1/settings`, { headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY } });
     const d = await res.json();
-    enabledCache = { at: Date.now(), value: !!d?.external?.google };
-  } catch { enabledCache = { at: Date.now(), value: false }; }
+    enabledCache = { at: Date.now(), value: { google: !!d?.external?.google, phone: !!d?.external?.phone } };
+  } catch { enabledCache = { at: Date.now(), value: { google: false, phone: false } }; }
   return enabledCache.value;
 }
+export const supabaseGoogleEnabled = async (env) => (await supabaseProviders(env)).google;

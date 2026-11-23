@@ -24,6 +24,13 @@ export default function AdminHosts() {
     await patch(review.host, { verification, note }, verification === 'verified' ? `${review.host.name} verified` : 'Verification rejected');
     closeReview();
   };
+  const bonus = async (h) => {
+    const v = prompt(`Bonus coins for ${h.name}`, '100');
+    if (!v) return;
+    const note = prompt('Note shown to the host', 'Daily bonus') || 'Bonus';
+    try { await api(`/admin/hosts/${h.id}/bonus`, { method: 'POST', body: { amount: Number(v), note } }); toast(`+${v} bonus sent to ${h.name}`, 'success'); load(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
   const KYC = { none: ['—', 'chip-grey'], pending: ['Review', 'chip-amber'], verified: ['Verified', 'chip-green'], rejected: ['Rejected', 'chip-red'] };
   const [f, setF] = useState({ name: '', email: '', password: '', city: '', languages: 'Hindi,English', gender: 'female' });
   const load = () => api('/admin/hosts').then(setRows);
@@ -44,7 +51,7 @@ export default function AdminHosts() {
       <div className="admin-top"><h1>Hosts</h1><div className="spacer" /><button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add host</button></div>
       {!rows ? <div className="spinner" /> : (
         <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
-          <thead><tr><th>Host</th><th>Status</th><th>Verification</th><th>Audio /min</th><th>Video /min</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
+          <thead><tr><th>Host</th><th>Status</th><th>Verification</th><th>Level</th><th>Rate (video · audio)</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
           <tbody>{rows.map((h) => (
             <tr key={h.id}>
               <td><div className="row"><Avatar src={h.avatar} name={h.name} size={34} online={!!h.online} busy={!!h.busy} /><div><b>{h.name}</b><div className="faint">{h.email}</div></div></div></td>
@@ -53,14 +60,20 @@ export default function AdminHosts() {
               <td>{h.kyc_status === 'pending'
                 ? <button className="btn btn-sm btn-primary" onClick={() => openReview(h)}>Review ID</button>
                 : <span className={`chip ${(KYC[h.kyc_status] || KYC.none)[1]}`} title={h.kyc_note || ''}>{(KYC[h.kyc_status] || KYC.none)[0]}</span>}</td>
-              <td><input className="rate-input" type="number" min={0} defaultValue={h.audio_rate} aria-label="Audio rate" onBlur={(e) => Number(e.target.value) !== h.audio_rate && patch(h, { audio_rate: e.target.value }, 'Audio rate saved')} /></td>
-              <td><input className="rate-input" type="number" min={0} defaultValue={h.video_rate} aria-label="Video rate" onBlur={(e) => Number(e.target.value) !== h.video_rate && patch(h, { video_rate: e.target.value }, 'Video rate saved')} /></td>
+              <td>
+                <select className="rate-input" style={{ width: 92 }} aria-label="Level" value={h.level_override ?? ''} onChange={(e) => patch(h, { level: e.target.value === '' ? null : Number(e.target.value) }, e.target.value === '' ? 'Level set automatically' : `Level set to ${e.target.value}`)}>
+                  <option value="">Auto ★{h.level}</option>
+                  {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>★ {n}</option>)}
+                </select>
+              </td>
+              <td style={{ whiteSpace: 'nowrap' }}>{h.video_rate} · {h.audio_rate}<span className="faint"> (tier {h.rate_level})</span></td>
               <td>{h.calls}</td>
               <td>{Math.round(h.seconds / 60)}</td>
               <td><Coins value={h.earnings} /></td>
               <td><div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                 {!h.approved ? <button className="btn btn-green btn-sm" onClick={() => patch(h, { approved: true }, `${h.name} approved`)}>Approve</button>
                   : <button className="btn btn-outline btn-sm" onClick={() => patch(h, { approved: false })}>Unapprove</button>}
+                <button className="btn btn-sm btn-outline" onClick={() => bonus(h)}>Bonus</button>
                 {h.status === 'active' ? <button className="btn btn-outline btn-sm" onClick={() => confirm(`Block ${h.name}?`) && patch(h, { status: 'blocked' })}>Block</button>
                   : <button className="btn btn-outline btn-sm" onClick={() => patch(h, { status: 'active' })}>Unblock</button>}
               </div></td>

@@ -21,7 +21,9 @@ export default function HostProfile() {
 
   useEffect(() => { api(`/hosts/${id}`).then(setH).catch((e) => { toast(e.message, 'error'); nav('/app'); }); }, [id]); // eslint-disable-line
   useEffect(() => {
-    const on = (s) => s.id === Number(id) && setH((x) => x && { ...x, online: s.online, busy: s.busy });
+    const on = (s) => s.id === Number(id) && setH((x) => x && {
+      ...x, ...(s.online !== undefined ? { online: s.online, busy: s.busy } : {}),
+      ...(s.acceptAudio !== undefined ? { accept_audio: s.acceptAudio, accept_video: s.acceptVideo } : {}) });
     socket?.on('host:status', on);
     return () => socket?.off('host:status', on);
   }, [socket, id]);
@@ -61,8 +63,8 @@ export default function HostProfile() {
       </div>
       <div className="p-actions">
         <button className="act violet" onClick={() => openChat(nav, h.id, toast)} aria-label="Chat"><Icon name="chat" size={26} fill /></button>
-        <button className="act blue" disabled={!avail} onClick={() => call('audio')} aria-label="Audio call"><Icon name="phone" size={26} fill /></button>
-        <button className="act green" disabled={!avail} onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={27} fill /></button>
+        <button className="act blue" disabled={!avail || !h.accept_audio} onClick={() => call('audio')} aria-label="Audio call"><Icon name="phone" size={26} fill /></button>
+        <button className="act green" disabled={!avail || !h.accept_video} onClick={() => call('video')} aria-label="Video call"><Icon name="video" size={27} fill /></button>
       </div>
       {menu && <ReportSheet target={h} onClose={() => setMenu(false)} onBlocked={() => nav('/app')} />}
     </div>

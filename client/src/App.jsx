@@ -25,6 +25,10 @@ import HostHistory from './pages/host/HostHistory.jsx';
 import HostBank from './pages/host/HostBank.jsx';
 import HostVerification from './pages/host/HostVerification.jsx';
 import HostLanguage from './pages/host/HostLanguage.jsx';
+import HostRate from './pages/host/HostRate.jsx';
+import HostAlerts from './pages/host/HostAlerts.jsx';
+import HostLeaderboard from './pages/host/HostLeaderboard.jsx';
+import HostInvite from './pages/host/HostInvite.jsx';
 import AdminLayout from './pages/admin/AdminLayout.jsx';
 import AdminDashboard from './pages/admin/AdminDashboard.jsx';
 import AdminUsers from './pages/admin/AdminUsers.jsx';
@@ -33,6 +37,7 @@ import AdminCalls from './pages/admin/AdminCalls.jsx';
 import AdminReports from './pages/admin/AdminReports.jsx';
 import AdminPayouts from './pages/admin/AdminPayouts.jsx';
 import AdminSettings from './pages/admin/AdminSettings.jsx';
+import AdminContent from './pages/admin/AdminContent.jsx';
 
 
 function Guard({ role, children }) {
@@ -75,15 +80,19 @@ export default function App() {
             <Route path="chats" element={<Chats />} />
             <Route path="wallet" element={<HostWallet />} />
             <Route path="earnings" element={<Navigate to="/host/wallet" replace />} />
-            <Route path="history" element={<HostHistory />} />
+            <Route path="calls" element={<HostHistory />} />
+            <Route path="history" element={<Navigate to="/host/calls" replace />} />
+            <Route path="alerts" element={<HostAlerts />} />
             <Route path="me" element={<Me />} />
-            <Route path="calls" element={<CallHistory />} />
             <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="/host/chat/:id" element={<Guard role="host"><ChatThread /></Guard>} />
           <Route path="/host/bank" element={<Guard role="host"><HostBank /></Guard>} />
           <Route path="/host/verification" element={<Guard role="host"><HostVerification /></Guard>} />
           <Route path="/host/language" element={<Guard role="host"><HostLanguage /></Guard>} />
+          <Route path="/host/rate" element={<Guard role="host"><HostRate /></Guard>} />
+          <Route path="/host/leaderboard" element={<Guard role="host"><HostLeaderboard /></Guard>} />
+          <Route path="/host/invite" element={<Guard role="host"><HostInvite /></Guard>} />
         </>}
 
         {APP === 'admin' && (
@@ -94,6 +103,7 @@ export default function App() {
             <Route path="calls" element={<AdminCalls />} />
             <Route path="reports" element={<AdminReports />} />
             <Route path="payouts" element={<AdminPayouts />} />
+            <Route path="content" element={<AdminContent />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
         )}
