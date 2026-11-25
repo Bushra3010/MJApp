@@ -7,9 +7,9 @@ import { useRecharge } from '../lib/recharge.jsx';
 import Icon from './Icon.jsx';
 import Coins from './Coins.jsx';
 
-const FIRST_MS = 25_000;      // first reminder after opening the app
-const EVERY_MS = 3 * 60_000;  // then every 3 minutes
-const LOW_EVERY_MS = 90_000;  // every 90 s when the balance can't cover a call
+const FIRST_MS = 8_000;       // first reminder soon after opening the app
+const EVERY_MS = 2 * 60_000;  // then every 2 minutes
+const LOW_EVERY_MS = 60_000;  // every minute when the balance can't cover a call
 const SHOW_MS = 12_000;
 const LOW = 30;               // a video call minute
 const SNOOZE_KEY = 'mj.rechargeSnooze';

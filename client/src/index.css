@@ -957,6 +957,15 @@ table.t .avatar { width: 34px; height: 34px; }
 .guarded body { -webkit-touch-callout: none; }
 .guarded .call, .guarded .p-photo, .guarded .gal, .guarded .gal-view { user-select: none; -webkit-user-select: none; }
 .privacy-hide #root { filter: blur(28px); }
-.privacy-hide body::after { content: 'Milo Julo'; position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: rgba(10,10,12,.85); color: #fff; font: 800 28px/1 Inter, system-ui, sans-serif; }
+.privacy-cover { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(10,10,12,.86); color: #fff; }
+.privacy-cover b { font-size: 28px; font-weight: 800; }
+.privacy-cover span { font-size: 14px; opacity: .7; }
 .wm { position: fixed; inset: -20%; z-index: 9000; pointer-events: none; display: flex; flex-wrap: wrap; align-content: space-around; justify-content: space-around; gap: 70px 50px;
   transform: rotate(-24deg); opacity: .045; color: #fff; font: 700 15px/1 Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; }
+.offer-card { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; border: 1.5px solid rgba(255,176,32,.45);
+  background: linear-gradient(110deg, rgba(255,138,61,.22), rgba(244,20,112,.18)); color: inherit; text-align: left; }
+.offer-card .oc-ic { width: 42px; height: 42px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 22px; background: linear-gradient(135deg, #ffb020, #ff6a3d); }
+.offer-card .oc-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.offer-card .oc-txt b { font-size: 15px; }
+.offer-card .oc-txt span { font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 4px; }
+.offer-card .oc-go { flex: none; display: flex; align-items: center; gap: 2px; padding: 8px 12px; border-radius: 999px; font-weight: 800; font-size: 13px; color: #fff; background: linear-gradient(135deg, #ff8a3d, #f41470); }

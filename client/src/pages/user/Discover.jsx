@@ -1,3 +1,4 @@
+import OfferCard from '../../components/OfferCard.jsx';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.jsx';
@@ -71,6 +72,7 @@ export default function Discover() {
           </div>
           <Icon name="chevron" size={20} />
         </Link>
+        <OfferCard style={{ marginBottom: 12 }} />
         {user?.free_trial?.available && <div className="trial-chip" style={{ marginBottom: 12 }}>🎁 Your first call is free for {user.free_trial.seconds} seconds</div>}
         <div className="filters">
           <button className={onlyOnline ? 'on' : ''} onClick={() => setOnlyOnline(!onlyOnline)} aria-pressed={onlyOnline}><i className="live-dot" />Online</button>

@@ -1,3 +1,4 @@
+import OfferCard from '../../components/OfferCard.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.jsx';
@@ -78,6 +79,7 @@ export default function Match() {
             <b>Audio match</b><span>{audio.length} online</span>
           </button>
         </div>
+        <OfferCard style={{ marginTop: 12 }} />
         <p className="faint" style={{ textAlign: 'center', marginTop: 14, display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center' }}>
           <Icon name="shield" size={14} />Be kind. Anyone who behaves inappropriately will be suspended.
         </p>
