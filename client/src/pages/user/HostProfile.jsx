@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Gallery from '../../components/Gallery.jsx';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
@@ -51,6 +52,7 @@ export default function HostProfile() {
       <div className="p-body" style={{ paddingBottom: 130 }}>
         <div className="p-label">About</div>
         <p className="p-text">{h.bio || `${h.name} hasn't written a bio yet.`}</p>
+        <Gallery hostId={h.id} />
         <div className="p-label">Languages</div>
         <div className="pills">{h.languages.split(',').map((l) => <span key={l} className="pill2">🗣️ {l}</span>)}</div>
         <div className="p-label">Rates</div>

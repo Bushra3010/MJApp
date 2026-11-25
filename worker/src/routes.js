@@ -106,6 +106,7 @@ export function buildApi(h) {
     if (role === 'host') createHostProfile(id, f.refCode);
     if (role === 'user' && h.setting('signup_bonus') > 0) h.moveCoins(id, h.setting('signup_bonus'), 'bonus', 'Welcome bonus');
     const u = fresh(id);
+    if (role === 'user') h.toHosts('customer:joined', h.customerCard(u));
     const token = await startSession(c, u);
     return { user: h.me(u), token };
   }));
@@ -179,6 +180,7 @@ export function buildApi(h) {
     if (app === 'host') createHostProfile(id, b.refCode);
     if (app === 'user' && h.setting('signup_bonus') > 0) h.moveCoins(id, h.setting('signup_bonus'), 'bonus', 'Welcome bonus');
     const nu = fresh(id);
+    if (app === 'user') h.toHosts('customer:joined', h.customerCard(nu));
     const token = await startSession(c, nu);
     return { user: h.me(nu), token, created: true };
   };
@@ -278,6 +280,41 @@ export function buildApi(h) {
     db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(`/uploads/${name}`, u.id);
     return h.me(fresh(u.id));
   }));
+
+  // ================= host photos & videos (profile gallery) =================
+  const PART = 1_800_000;
+  const MEDIA_LIMITS = { photo: { max: 8, bytes: 3 * 1024 * 1024 }, video: { max: 3, bytes: 30 * 1024 * 1024 } };
+  const mediaOf = (hostId) => db.prepare('SELECT id, kind, name, type, created_at FROM host_media WHERE host_id = ? ORDER BY id').all(hostId)
+    .map((m) => ({ id: m.id, kind: m.kind, url: `/uploads/m/${m.name}`, type: m.type }));
+  app.get('/host/media', auth('host'), R((c) => mediaOf(c.get('user').id)));
+  app.post('/host/media', auth('host'), limit('upload', 20, 60), R(async (c) => {
+    const form = await c.req.parseBody().catch(() => ({}));
+    const file = form.file;
+    if (!file || typeof file === 'string') throw bad('Choose a photo or video');
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const type = sniffImage(buf) || sniffVideo(buf);
+    if (!type) throw bad('Use a JPG, PNG or WebP photo, or an MP4 / MOV / WebM video');
+    const kind = type.startsWith('video/') ? 'video' : 'photo';
+    const lim = MEDIA_LIMITS[kind];
+    if (buf.length > lim.bytes) throw bad(kind === 'video' ? 'Video must be under 30 MB (about 1 minute)' : 'Photo must be under 3 MB');
+    const id = c.get('user').id;
+    const have = db.prepare('SELECT COUNT(*) n FROM host_media WHERE host_id = ? AND kind = ?').get(id, kind).n;
+    if (have >= lim.max) throw bad(`You can add up to ${lim.max} ${kind}s. Delete one first.`);
+    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' }[type];
+    const name = `${randomHex(16)}.${ext}`;
+    for (let i = 0, k = 0; i < buf.length; i += PART, k++) {
+      db.prepare('INSERT INTO upload_parts (name, idx, data) VALUES (?,?,?)').run(name, k, buf.slice(i, i + PART).buffer);
+    }
+    db.prepare('INSERT INTO host_media (host_id, kind, name, type, size) VALUES (?,?,?,?,?)').run(id, kind, name, type, buf.length);
+    return mediaOf(id);
+  }));
+  app.delete('/host/media/:id', auth('host'), R((c) => {
+    const id = c.get('user').id;
+    const m = db.prepare('SELECT * FROM host_media WHERE id = ? AND host_id = ?').get(Number(c.req.param('id')), id);
+    if (m) { db.prepare('DELETE FROM upload_parts WHERE name = ?').run(m.name); db.prepare('DELETE FROM host_media WHERE id = ?').run(m.id); }
+    return mediaOf(id);
+  }));
+  app.get('/hosts/:id/media', auth(), R((c) => mediaOf(Number(c.req.param('id')))));
 
   app.delete('/me', auth('user', 'host'), R(async (c) => {
     const { password, confirm } = parse(z.object({ password: z.string().default(''), confirm: z.string().default('') }), await body(c));
@@ -393,12 +430,14 @@ export function buildApi(h) {
   };
 
   // ================= customers (for hosts) =================
+  const yearsOld = (d) => { const b = new Date(d); if (Number.isNaN(+b)) return null; const n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a > 0 && a < 120 ? a : null; };
   const memberCard = (x) => ({ id: x.id, name: x.name, avatar: x.avatar, city: x.city, languages: x.languages, created_at: x.created_at, last_seen_at: x.last_seen_at,
+    gender: x.gender || null, age: x.birth_date ? yearsOld(x.birth_date) : null,
     online: h.isOnline(x.id) ? 1 : 0, isNew: Date.now() - Date.parse(String(x.created_at).replace(' ', 'T') + 'Z') < 7 * 86_400_000 });
   app.get('/host/customers', auth('host'), R((c) => {
     const me = c.get('user').id;
     const tab = c.req.query('tab') || 'online';
-    const rows = db.prepare(`SELECT id, name, avatar, city, languages, created_at, last_seen_at FROM users u WHERE role = 'user' AND status = 'active'
+    const rows = db.prepare(`SELECT id, name, avatar, city, languages, gender, birth_date, created_at, last_seen_at FROM users u WHERE role = 'user' AND status = 'active'
       AND id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?) AND id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ?)
       ORDER BY ${tab === 'new' ? 'id DESC' : 'last_seen_at DESC'} LIMIT 1000`).all(me, me).map(memberCard);
     const online = rows.filter((x) => x.online);
@@ -408,7 +447,7 @@ export function buildApi(h) {
   }));
   app.get('/host/customers/:id', auth('host'), R((c) => {
     const me = c.get('user').id;
-    const x = db.prepare("SELECT id, name, avatar, bio, city, languages, created_at, last_seen_at FROM users WHERE id = ? AND role = 'user' AND status = 'active'").get(Number(c.req.param('id')));
+    const x = db.prepare("SELECT id, name, avatar, bio, city, languages, gender, birth_date, created_at, last_seen_at FROM users WHERE id = ? AND role = 'user' AND status = 'active'").get(Number(c.req.param('id')));
     if (!x || isBlocked(me, x.id)) throw bad('Member not found', 404);
     const calls = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(seconds),0) s FROM calls WHERE host_id = ? AND user_id = ? AND status = 'ended'").get(me, x.id);
     const conv = db.prepare('SELECT id FROM conversations WHERE host_id = ? AND user_id = ?').get(me, x.id);
@@ -596,12 +635,13 @@ export function buildApi(h) {
   // Levels & call-rate tiers
   const programme = (id) => {
     ensureLevel(h, id);
-    const prof = db.prepare('SELECT level, level_override, total_earned, rate_custom, video_rate, audio_rate, accept_audio, accept_video FROM host_profiles WHERE user_id = ?').get(id);
+    const prof = db.prepare('SELECT level, level_override, total_earned, earnings, rate_custom, video_rate, audio_rate, accept_audio, accept_video FROM host_profiles WHERE user_id = ?').get(id);
     const table = levelsTable(db);
     const cur = tierOf(table, prof.level);
     const next = table.find((t) => t.level === prof.level + 1) || null;
     return { levels: table, level: prof.level, overridden: !!prof.level_override, customRate: !!prof.rate_custom,
       totalEarned: prof.total_earned, next, coinToInr: h.setting('coin_to_inr'),
+      earningsInr: +((prof.earnings || 0) * (h.setting('coin_to_inr') || 0.5)).toFixed(2), minWithdrawInr: h.setting('min_withdraw_inr') || 2000,
       earnAudio: cur.audio_earn, earnVideo: cur.video_earn, // ₹ per minute the host earns
       videoRate: prof.video_rate, audioRate: prof.audio_rate, // coins per minute the member pays
       acceptAudio: !!prof.accept_audio, acceptVideo: !!prof.accept_video, now: Date.now() };
@@ -1084,6 +1124,13 @@ export function buildApi(h) {
   return app;
 }
 
+function sniffVideo(b) {
+  if (b.length > 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    return String.fromCharCode(b[8], b[9], b[10], b[11]) === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+  }
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'video/webm';
+  return null;
+}
 function sniffImage(b) {
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';

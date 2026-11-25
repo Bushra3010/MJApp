@@ -29,7 +29,7 @@ export default {
       const hit = await cache.match(req);
       if (hit) return hit;
       const res = await hub(env).fetch(req);
-      if (res.ok) ctx.waitUntil(cache.put(req, res.clone()));
+      if (res.status === 200 && !req.headers.has('range')) ctx.waitUntil(cache.put(req, res.clone()));
       return res;
     }
 

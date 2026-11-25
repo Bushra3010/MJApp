@@ -33,6 +33,16 @@ export function LevelProgress({ prog, compactView = false }) {
         </div>
         {!compactView && <p className="faint" style={{ marginTop: 8 }}>At Level {next.level} you earn ₹{next.audio_earn}/min on audio and ₹{next.video_earn}/min on video calls.</p>}
       </>) : <p className="muted" style={{ marginTop: 6 }}>You're at the top level 🏆</p>}
+      {prog.minWithdrawInr > 0 && (() => {
+        const have = prog.earningsInr || 0; const min = prog.minWithdrawInr; const ok = have >= min;
+        const rs = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+        return (
+          <Link to="/host/wallet" className={`wd-line ${ok ? 'ok' : ''}`}>
+            <Icon name="wallet" size={16} />
+            <span>{ok ? <>You can withdraw now · <b>{rs(have)}</b> ready</> : <>Withdraw after your income reaches <b>{rs(min)}</b> · {rs(have)} / {rs(min)}</>}</span>
+          </Link>
+        );
+      })()}
     </div>
   );
 }

@@ -481,7 +481,7 @@ try {
   await req(`/admin/hosts/${HV.user.id}`, { method: 'PATCH', body: { approved: true } }, A);
   const hvs = await sock(HV); await hvs.ack('presence:set', { online: true });
   const UV = (await signup({ name: 'Upgrade Member' }, 'user')).body;
-  await req(`/admin/users/${UV.user.id}/credit`, { method: 'POST', body: { amount: 300 } }, A);
+  await req(`/admin/users/${UV.user.id}/credit`, { method: 'POST', body: { amount: 600 } }, A);
   const uvs = await sock(UV);
   let vinc = hvs.once('call:incoming');
   const vr = await uvs.ack('call:start', { hostId: HV.user.id, type: 'audio' }); await vinc;
@@ -504,6 +504,52 @@ try {
   const vEnd = uvs.once('call:ended'); uvs.emit('call:end', { callId: vr.callId });
   assert.equal((await vEnd).status, 'ended');
   assert.equal((await req('/calls', {}, UV)).body[0].type, 'video'); ok('the call record shows it ended as a video call');
+
+  // host asks for video, member accepts
+  vinc = hvs.once('call:incoming');
+  const hr = await uvs.ack('call:start', { hostId: HV.user.id, type: 'audio' }); await vinc;
+  await hvs.ack('call:accept', { callId: hr.callId });
+  const askU = uvs.once('call:upgrade-request');
+  assert.ok((await hvs.ack('call:upgrade', { callId: hr.callId })).ok);
+  assert.equal((await askU).callId, hr.callId);
+  assert.equal((await hvs.ack('call:upgrade-answer', { callId: hr.callId, accept: true })).error, 'No video request'); ok("the side that asked can't answer its own video request");
+  const hu1 = uvs.once('call:upgraded'), hu2 = hvs.once('call:upgraded');
+  assert.ok((await uvs.ack('call:upgrade-answer', { callId: hr.callId, accept: true })).ok);
+  assert.equal((await hu1).type, 'video'); await hu2; ok('host can ask to switch to video too; the member accepts');
+  const hrEnd = uvs.once('call:ended'); uvs.emit('call:end', { callId: hr.callId }); await hrEnd;
+
+  // host calls a member from the member's profile
+  const inU = uvs.once('call:incoming');
+  const hc = await hvs.ack('call:start', { userId: UV.user.id, type: 'audio' });
+  assert.ok(hc.ok, JSON.stringify(hc)); assert.equal(hc.peer.id, UV.user.id);
+  assert.equal((await inU).from.id, HV.user.id); ok('host rings a member who is online');
+  assert.equal((await hvs.ack('call:accept', { callId: hc.callId })).error, 'Call no longer available'); ok("the host can't answer their own call");
+  const hcOnH = hvs.once('call:connected'), hcOnU = uvs.once('call:connected');
+  assert.ok((await uvs.ack('call:accept', { callId: hc.callId })).ok);
+  const [cH, cU] = await Promise.all([hcOnH, hcOnU]);
+  assert.equal(cU.role, 'caller'); assert.equal(cH.role, 'callee'); ok('member answers the host’s call and pays per minute as usual');
+  const hcEnd = hvs.once('call:ended'); hvs.emit('call:end', { callId: hc.callId }); assert.equal((await hcEnd).status, 'ended');
+  const decl = hvs.once('call:ended');
+  const hc2 = await hvs.ack('call:start', { userId: UV.user.id, type: 'video' });
+  await uvs.ack('call:decline', { callId: hc2.callId });
+  assert.equal((await decl).status, 'declined'); ok('member can decline a host’s call');
+
+  // host photos & videos
+  const gpng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(200).fill(1)]);
+  const mp4 = new Uint8Array(4_000_000); mp4.set([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]); mp4[3_999_999] = 7;
+  const upMedia = (bytes, name, type) => { const fd = new FormData(); fd.append('file', new Blob([bytes], { type }), name); return req('/host/media', { method: 'POST', form: fd }, HV); };
+  assert.equal((await upMedia(gpng, 'a.png', 'image/png')).status, 200);
+  const vids = (await upMedia(mp4, 'v.mp4', 'video/mp4')).body;
+  assert.equal(vids.length, 2); const vid = vids.find((m) => m.kind === 'video');
+  assert.equal((await upMedia(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), 'x.txt', 'text/plain')).status, 400); ok('host uploads a photo and a 4 MB video; other files are refused');
+  assert.equal((await req(`/hosts/${HV.user.id}/media`, {}, UV)).body.length, 2); ok('members see the host’s photos and videos');
+  const whole = await fetch(base + vid.url);
+  assert.equal(whole.status, 200); const vb = new Uint8Array(await whole.arrayBuffer());
+  assert.equal(vb.length, 4_000_000); assert.equal(vb[3_999_999], 7); assert.equal(vb[4], 0x66);
+  const part = await fetch(base + vid.url, { headers: { range: 'bytes=1799990-1800009' } });
+  assert.equal(part.status, 206); assert.equal((await part.arrayBuffer()).byteLength, 20); ok('video streams whole and by byte range across stored pieces');
+  assert.equal((await req(`/host/media/${vid.id}`, { method: 'DELETE' }, HV)).body.length, 1);
+  assert.ok(!(await req(`/hosts/${HV.user.id}/media`, {}, UV)).body.some((m) => m.id === vid.id)); ok('host deletes a video');
 
   // 5. ratings & reviews
   const vrev = await req(`/calls/${vr.callId}/review`, { method: 'POST', body: { stars: 5, body: 'Lovely chat!' } }, UV);

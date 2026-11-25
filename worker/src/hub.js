@@ -175,7 +175,9 @@ export class Hub extends DurableObject {
   /** What hosts may see about a member. */
   customerCard(u) {
     const isNew = Date.now() - Date.parse(String(u.created_at).replace(' ', 'T') + 'Z') < 7 * 86_400_000;
-    return { id: u.id, name: u.name, avatar: u.avatar, city: u.city, languages: u.languages, created_at: u.created_at, online: this.isOnline(u.id) ? 1 : 0, isNew };
+    const b = u.birth_date ? new Date(u.birth_date) : null;
+    const age = b && !Number.isNaN(+b) ? Math.floor((Date.now() - b) / 31_557_600_000) : null;
+    return { id: u.id, name: u.name, avatar: u.avatar, city: u.city, languages: u.languages, gender: u.gender || null, age, created_at: u.created_at, online: this.isOnline(u.id) ? 1 : 0, isNew };
   }
 
   setHostFlags(hostId, fields) {
@@ -189,6 +191,7 @@ export class Hub extends DurableObject {
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === '/ws') return this.openSocket(req);
+    if (url.pathname.startsWith('/uploads/m/')) return this.serveMedia(req, url.pathname.slice(11));
     if (url.pathname.startsWith('/uploads/')) {
       const row = this.db.prepare('SELECT type, data FROM uploads WHERE name = ?').get(url.pathname.slice(9));
       if (!row) return new Response('Not found', { status: 404 });
@@ -198,6 +201,30 @@ export class Hub extends DurableObject {
       } });
     }
     return this.api.fetch(req, this.env);
+  }
+
+  /** Gallery photos/videos are stored in pieces; serve them whole or by byte range (phones stream video with Range). */
+  serveMedia(req, name) {
+    const m = this.db.prepare('SELECT type, size FROM host_media WHERE name = ?').get(name);
+    if (!m) return new Response('Not found', { status: 404 });
+    const PART = 1_800_000;
+    const head = { 'content-type': m.type, 'accept-ranges': 'bytes', 'cache-control': 'public, max-age=31536000, immutable',
+      'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'" };
+    let start = 0; let end = m.size - 1; let status = 200;
+    const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get('range') || '');
+    if (r) {
+      if (r[1] === '') { start = Math.max(0, m.size - Number(r[2])); } else { start = Number(r[1]); if (r[2] !== '') end = Math.min(end, Number(r[2])); }
+      if (start > end || start >= m.size) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${m.size}` } });
+      status = 206; head['content-range'] = `bytes ${start}-${end}/${m.size}`;
+    }
+    const out = new Uint8Array(end - start + 1);
+    for (let k = Math.floor(start / PART); k <= Math.floor(end / PART); k++) {
+      const part = new Uint8Array(this.db.prepare('SELECT data FROM upload_parts WHERE name = ? AND idx = ?').get(name, k).data);
+      const from = Math.max(start, k * PART); const to = Math.min(end + 1, k * PART + part.length);
+      out.set(part.subarray(from - k * PART, to - k * PART), from - start);
+    }
+    head['content-length'] = String(out.length);
+    return new Response(out, { status, headers: head });
   }
 
   async openSocket(req) {
@@ -261,13 +288,14 @@ export class Hub extends DurableObject {
         if (d.online) { ensureLevel(this, u.id); onlineStart(this, u.id); } else onlineStop(this, u.id);
         return { ok: true, online: d.online ? 1 : 0 };
       }
-      case 'call:start': return this.startCall(u, Number(d.hostId), d.type, d.device);
+      case 'call:start': return u.role === 'host' ? this.hostCallsMember(u, Number(d.userId), d.type) : this.startCall(u, Number(d.hostId), d.type, d.device);
       case 'call:upgrade': return this.requestUpgrade(u, Number(d.callId));
       case 'call:upgrade-answer': return this.answerUpgrade(u, Number(d.callId), !!d.accept);
       case 'call:accept': return this.acceptCall(u, Number(d.callId));
       case 'call:decline': {
         const c = this.liveCallOf(u, d.callId);
-        if (c && c.status === 'ringing') this.endCall(c.id, c.host_id === u.id ? 'declined' : 'cancelled');
+        // the person being rung declines; the caller cancels
+        if (c && c.status === 'ringing') this.endCall(c.id, (c.from_host ? c.user_id : c.host_id) === u.id ? 'declined' : 'cancelled');
         return { ok: true };
       }
       case 'call:end': {
@@ -328,9 +356,35 @@ export class Hub extends DurableObject {
     return { ok: true, callId, rate, freeTrialMs: trialMs, host: { id: hostId, name: h.name, avatar: h.avatar } };
   }
 
+  /** A host rings a member who is online. The member answers and pays the host's normal per-minute price. */
+  hostCallsMember(u, userId, type) {
+    const db = this.db;
+    if (!['audio', 'video'].includes(type)) return { error: 'Bad call type' };
+    const hp = db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id);
+    if (!hp?.approved) return { error: 'Your profile is waiting for admin approval' };
+    if (this.setting('require_host_verification') === 1 && hp.kyc_status !== 'verified') return { error: 'Complete identity verification before calling members', code: 'NEEDS_VERIFICATION' };
+    if (hp.busy || db.prepare('SELECT 1 FROM live_calls WHERE host_id = ?').get(u.id)) return { error: 'You are already in a call' };
+    const m = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'user'").get(userId);
+    if (!m || m.status !== 'active') return { error: 'Member not found' };
+    if (db.prepare('SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)').get(u.id, userId, userId, u.id)) return { error: 'Member not available' };
+    if (!this.isOnline(userId)) return { error: `${m.name} is offline right now. You can call when they come online.` };
+    if (db.prepare('SELECT 1 FROM live_calls WHERE user_id = ?').get(userId)) return { error: `${m.name} is on another call. Try again in a bit.` };
+    ensureLevel(this, u.id);
+    const rate = type === 'video' ? hp.video_rate : hp.audio_rate;
+    if (m.coins < rate) return { error: `${m.name} doesn't have enough coins for a ${type} call right now. Send a chat instead.`, code: 'MEMBER_LOW_BALANCE' };
+    const callId = Number(db.prepare('INSERT INTO calls (user_id, host_id, type, rate) VALUES (?,?,?,?)').run(userId, u.id, type, rate).lastInsertRowid);
+    db.prepare(`INSERT INTO live_calls (id, user_id, host_id, type, rate, status, ring_deadline_ms, user_name, host_name, free_trial_ms, from_host)
+      VALUES (?,?,?,?,?, 'ringing', ?, ?, ?, 0, 1)`).run(callId, userId, u.id, type, rate, Date.now() + RING_MS, m.name, u.name);
+    this.setHostFlags(u.id, { busy: 1 });
+    this.emitTo(userId, 'call:incoming', { callId, type, rate, freeTrialMs: 0, from: { id: u.id, name: u.name, avatar: u.avatar } });
+    this.pushTo(userId, { title: `Incoming ${type} call`, body: `${u.name} is calling you`, url: '/app', tag: `call-${callId}`, call: true }, { urgency: 'high', ttl: 30 });
+    this.scheduleAlarm();
+    return { ok: true, callId, rate, freeTrialMs: 0, peer: { id: userId, name: m.name, avatar: m.avatar } };
+  }
+
   acceptCall(u, callId) {
     const c = this.db.prepare('SELECT * FROM live_calls WHERE id = ?').get(callId);
-    if (!c || c.host_id !== u.id || c.status !== 'ringing') return { error: 'Call no longer available' };
+    if (!c || (c.from_host ? c.user_id : c.host_id) !== u.id || c.status !== 'ringing') return { error: 'Call no longer available' };
     const now = Date.now();
     let trialMs = c.free_trial_ms || 0;
     if (trialMs) {
@@ -375,26 +429,33 @@ export class Hub extends DurableObject {
     return true;
   }
 
-  /** Member asks to turn an audio call into a video call. The host decides; the call keeps running meanwhile. */
+  /** Either side asks to turn an audio call into a video call; the other side decides. The call keeps running meanwhile. */
   requestUpgrade(u, callId) {
     const c = this.liveCallOf(u, callId);
-    if (!c || c.user_id !== u.id || c.status !== 'active') return { error: 'Call not active' };
+    if (!c || c.status !== 'active') return { error: 'Call not active' };
     if (c.type === 'video') return { error: 'This is already a video call' };
+    if (c.upgrade_pending) return { error: 'Waiting for an answer to the video request' };
     const hp = this.db.prepare('SELECT video_rate, accept_video FROM host_profiles WHERE user_id = ?').get(c.host_id);
-    if (!hp?.accept_video) return { error: `${c.host_name} isn't taking video calls right now` };
-    const me = this.db.prepare('SELECT coins FROM users WHERE id = ?').get(u.id);
-    if (me.coins < hp.video_rate) return { error: `You need at least ${hp.video_rate} coins for video`, code: 'LOW_BALANCE', rate: hp.video_rate };
-    this.db.prepare('UPDATE live_calls SET upgrade_pending = 1 WHERE id = ?').run(c.id);
-    this.emitTo(c.host_id, 'call:upgrade-request', { callId: c.id, rate: hp.video_rate, from: c.user_name });
+    const byHost = u.id === c.host_id;
+    if (!byHost && !hp?.accept_video) return { error: `${c.host_name} isn't taking video calls right now` };
+    const member = this.db.prepare('SELECT coins FROM users WHERE id = ?').get(c.user_id);
+    if (member.coins < hp.video_rate) {
+      return byHost ? { error: `${c.user_name} doesn't have enough coins for video right now` }
+        : { error: `You need at least ${hp.video_rate} coins for video`, code: 'LOW_BALANCE', rate: hp.video_rate };
+    }
+    this.db.prepare('UPDATE live_calls SET upgrade_pending = ? WHERE id = ?').run(byHost ? 2 : 1, c.id);
+    this.emitTo(byHost ? c.user_id : c.host_id, 'call:upgrade-request', { callId: c.id, rate: hp.video_rate, from: byHost ? c.host_name : c.user_name });
     return { ok: true, rate: hp.video_rate };
   }
 
-  /** Host accepts or declines the switch to video. On accept the same call continues as video, billed at the video rate from the next minute. */
+  /** The other side accepts or declines the switch. On accept the same call continues as video, billed at the video rate from the next minute. */
   answerUpgrade(u, callId, accept) {
     const c = this.liveCallOf(u, callId);
-    if (!c || c.host_id !== u.id || c.status !== 'active' || !c.upgrade_pending) return { error: 'No video request' };
+    if (!c || c.status !== 'active' || !c.upgrade_pending) return { error: 'No video request' };
+    const askedBy = c.upgrade_pending === 2 ? c.host_id : c.user_id;
+    if (u.id === askedBy) return { error: 'No video request' };
     this.db.prepare('UPDATE live_calls SET upgrade_pending = 0 WHERE id = ?').run(c.id);
-    if (!accept) { this.emitTo(c.user_id, 'call:upgrade-declined', { callId: c.id }); return { ok: true }; }
+    if (!accept) { this.emitTo(askedBy, 'call:upgrade-declined', { callId: c.id }); return { ok: true }; }
     const rate = this.db.prepare('SELECT video_rate FROM host_profiles WHERE user_id = ?').get(c.host_id).video_rate;
     this.db.prepare("UPDATE live_calls SET type = 'video', rate = ? WHERE id = ?").run(rate, c.id);
     this.db.prepare("UPDATE calls SET type = 'video', rate = ? WHERE id = ?").run(rate, c.id);
@@ -421,13 +482,15 @@ export class Hub extends DurableObject {
       db.prepare('INSERT OR IGNORE INTO conversations (user_id, host_id) VALUES (?, ?)').run(c.user_id, c.host_id);
       const conv = db.prepare('SELECT * FROM conversations WHERE user_id = ? AND host_id = ?').get(c.user_id, c.host_id);
       const id = db.prepare("INSERT INTO messages (conversation_id, sender_id, type, body) VALUES (?, ?, 'call', ?)")
-        .run(conv.id, c.user_id, status === 'ended' ? `${label} · ${mmss} · ${c.charged ? `${c.charged} coins` : 'free trial'}` : `${label} · ${status}`).lastInsertRowid;
+        .run(conv.id, c.from_host ? c.host_id : c.user_id, status === 'ended' ? `${label} · ${mmss} · ${c.charged ? `${c.charged} coins` : 'free trial'}` : `${label} · ${status}`).lastInsertRowid;
       db.prepare("UPDATE conversations SET last_message_at = datetime('now') WHERE id = ?").run(conv.id);
       const msg = db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
       this.emitTo(c.user_id, 'message:new', msg);
       this.emitTo(c.host_id, 'message:new', msg);
     } catch { /* one side deleted their account */ }
-    if (status === 'missed' && reason === 'no_answer') {
+    if (status === 'missed' && reason === 'no_answer' && c.from_host) {
+      this.pushTo(c.user_id, { title: 'Missed call', body: `You missed a ${c.type} call from ${c.host_name}`, url: `/app/host/${c.host_id}`, tag: `call-${c.id}` });
+    } else if (status === 'missed' && reason === 'no_answer') {
       this.pushTo(c.host_id, { title: 'Missed call', body: `You missed a ${c.type} call from ${c.user_name}`, url: '/host', tag: `call-${c.id}` });
       addAlert(this, c.host_id, 'missed', 'Missed call', `You missed a ${c.type} call from ${c.user_name}`, '/host/calls');
     }

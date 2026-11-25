@@ -11,6 +11,7 @@ const paths = {
   chevrons: <path d="M6 6l6 6-6 6M13 6l6 6-6 6" />,
   cards: <><rect x="7" y="3" width="13" height="16" rx="3" /><path d="M4 7.5V18a3 3 0 003 3h8" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
+  trash: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 13h10l1-13M9 7V4h6v3" /></>,
   chevron: <path d="M9 5l7 7-7 7" />,
   gift: <><rect x="3" y="8" width="18" height="5" rx="1.5" /><path d="M5 13v7h14v-7M12 8v12M12 8c-1.5-3-5-3.5-5-1.2C7 8 9 8 12 8zM12 8c1.5-3 5-3.5 5-1.2C17 8 15 8 12 8z" /></>,
   shield: <path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z" />,

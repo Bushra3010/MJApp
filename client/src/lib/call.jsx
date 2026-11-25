@@ -154,6 +154,7 @@ export function CallProvider({ children }) {
     const onUpgradeDeclined = (p) => {
       if (p.callId !== callRef.current.callId) return;
       setCall((c) => ({ ...c, upgrade: null }));
+      dropCamera();
       toast(`${callRef.current.peer?.name || 'They'} would rather stay on audio`, 'info');
     };
     const onUpgraded = async (p) => {
@@ -189,6 +190,7 @@ export function CallProvider({ children }) {
     return () => window.removeEventListener('pagehide', bye);
   }, [socket]);
 
+  /** Members call a host; hosts can also ring a member. `peer` is the person being called. */
   const startCall = async (host, type) => {
     if (callRef.current.phase !== 'idle') return;
     setCall({ phase: 'outgoing', type, peer: host, status: 'Getting camera & mic…' });
@@ -199,13 +201,13 @@ export function CallProvider({ children }) {
       toast(e.name === 'NotAllowedError' ? 'Allow microphone' + (type === 'video' ? ' and camera' : '') + ' to call' : e.message, 'error');
       return;
     }
-    const res = await emitAck('call:start', { hostId: host.id, type, device: deviceId() });
+    const res = await emitAck('call:start', roleRef.current === 'host' ? { userId: host.id, type } : { hostId: host.id, type, device: deviceId() });
     if (res?.error) {
       cleanup(); setCall(IDLE);
       if (res.code !== 'LOW_BALANCE') toast(res.error, 'error');
       return res;
     }
-    setCall({ phase: 'outgoing', callId: res.callId, type, rate: res.rate, peer: res.host, status: 'Ringing…', freeTrialMs: res.freeTrialMs || 0 });
+    setCall({ phase: 'outgoing', callId: res.callId, type, rate: res.rate, peer: res.host || res.peer || host, status: 'Ringing…', freeTrialMs: res.freeTrialMs || 0 });
     ringer.current.start('back');
     return res;
   };
@@ -241,16 +243,27 @@ export function CallProvider({ children }) {
     pc.current?.addTrack(vt, local.current);
     setLocalStream(new MediaStream(local.current.getTracks()));
   };
-  /** Member: ask the host to switch this audio call to video. */
+  /** Either side: ask to switch this audio call to video.
+   *  The member places the WebRTC offer, so a member's camera is added when the switch is accepted;
+   *  a host turns the camera on before asking so its video is in the member's next offer. */
   const requestVideo = async () => {
     const c = callRef.current;
     if (c.phase !== 'active' || c.type !== 'audio' || c.upgrade) return;
     setCall((x) => ({ ...x, upgrade: 'waiting' }));
+    if (roleRef.current === 'host') {
+      try { await addCamera(); } catch { setCall((x) => ({ ...x, upgrade: null })); toast('Allow the camera to switch to video', 'error'); return; }
+    }
     const res = await emitAck('call:upgrade', { callId: c.callId });
-    if (res?.error) { setCall((x) => ({ ...x, upgrade: null })); toast(res.error, 'error'); }
+    if (res?.error) { setCall((x) => ({ ...x, upgrade: null })); dropCamera(); toast(res.error, 'error'); }
     return res;
   };
-  /** Host: answer the switch-to-video request. The camera is turned on before saying yes. */
+  /** Turn the camera back off when a video request goes nowhere (no renegotiation happened). */
+  const dropCamera = () => {
+    if (callRef.current.type === 'video') return;
+    local.current?.getVideoTracks().forEach((t) => { t.stop(); local.current.removeTrack(t); });
+    if (local.current) setLocalStream(new MediaStream(local.current.getTracks()));
+  };
+  /** Answer the other side's switch-to-video request. The camera is turned on before saying yes. */
   const answerVideo = async (accept) => {
     const c = callRef.current;
     setCall((x) => ({ ...x, upgradeRequest: null }));

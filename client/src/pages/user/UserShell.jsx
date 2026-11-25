@@ -1,13 +1,11 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import Icon from '../../components/Icon.jsx';
-import AvailabilityPopup from '../../components/AvailabilityPopup.jsx';
 import { useUnread } from '../../lib/useUnread.js';
 
 export default function UserShell() {
   const unread = useUnread();
   return (
     <div className="app-shell">
-      <AvailabilityPopup />
       <Outlet />
       <nav className="bottom-nav labeled" aria-label="Main">
         <NavLink to="/app" end><Icon name="home" size={24} /><span>Discover</span></NavLink>

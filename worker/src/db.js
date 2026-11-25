@@ -240,6 +240,19 @@ const SCHEMA = [
   );
   CREATE INDEX IF NOT EXISTS idx_violations_user ON contact_violations(user_id);
   UPDATE host_profiles SET level = 1, rate_level = 1, level_override = NULL;`,
+  // v8 — hosts can call members too (the member still pays per minute)
+  `ALTER TABLE live_calls ADD COLUMN from_host INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS host_media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    host_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,            -- photo | video
+    name TEXT NOT NULL UNIQUE,     -- served at /uploads/m/<name>
+    type TEXT NOT NULL, size INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_media_host ON host_media(host_id, id);
+  -- large files are kept in pieces (a single SQLite value is limited to 2 MB)
+  CREATE TABLE IF NOT EXISTS upload_parts (name TEXT NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (name, idx));`,
 ];
 
 export const DEFAULT_SETTINGS = {

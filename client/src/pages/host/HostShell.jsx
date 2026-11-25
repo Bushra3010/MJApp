@@ -11,8 +11,9 @@ export default function HostShell() {
     <div className="app-shell">
       <CustomerPopup />
       <Outlet />
-      <nav className="bottom-nav five" aria-label="Main">
+      <nav className="bottom-nav five six" aria-label="Main">
         <NavLink to="/host" end><Icon name="home" size={24} /><span className="nav-t">Home</span></NavLink>
+        <NavLink to="/host/calls"><Icon name="history" size={24} /><span className="nav-t">History</span></NavLink>
         <NavLink to="/host/chats"><Icon name="chat" size={24} /><span className="nav-t">Chats</span>{unread > 0 && <span className="badge">{unread}</span>}</NavLink>
         <NavLink to="/host/customers"><Icon name="users" size={24} /><span className="nav-t">Customers</span></NavLink>
         <NavLink to="/host/alerts"><Icon name="bell" size={24} /><span className="nav-t">Alerts</span>{alerts > 0 && <span className="badge">{alerts}</span>}</NavLink>

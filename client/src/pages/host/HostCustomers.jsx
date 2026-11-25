@@ -55,7 +55,8 @@ export default function HostCustomers() {
             <Avatar src={c.avatar} name={c.name} size={52} online={!!c.online} />
             <div className="txt">
               <b>{c.name}{c.isNew && <span className="chip chip-green new-chip">New</span>}</b>
-              <span>{[c.city, (c.languages || '').split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · ') || 'Member'}</span>
+              <span>{[c.age && `${c.age} yrs`, c.gender && c.gender[0].toUpperCase() + c.gender.slice(1), c.city, (c.languages || '').split(',').slice(0, 2).join(', ')].filter(Boolean).join(' · ') || 'Member'}</span>
+              <span className="view-prof">View profile ›</span>
             </div>
             <div style={{ textAlign: 'right' }}>
               <span className={`on-label ${c.online ? 'on' : ''}`}>{c.online ? 'Online' : 'Offline'}</span>

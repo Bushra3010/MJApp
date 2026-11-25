@@ -7,6 +7,7 @@ import { initials, warmFor } from '../components/Avatar.jsx';
 import Icon from '../components/Icon.jsx';
 import Coins from '../components/Coins.jsx';
 import { preparePhoto } from '../lib/image.js';
+import Gallery from '../components/Gallery.jsx';
 
 export default function Me() {
   const { user, setUser, logout } = useAuth();
@@ -82,6 +83,7 @@ export default function Me() {
           <p className="p-text">{user.bio || <span className="muted">Tell people a little about yourself — tap the pencil to add a bio.</span>}</p>
           {langs.length > 0 && <><div className="p-label">Languages</div><div className="pills">{langs.map((l) => <span key={l} className="pill2">🗣️ {l}</span>)}</div></>}
         </>)}
+        {user.role === 'host' && <Gallery hostId={user.id} editable />}
         <div className="p-label">Account</div>
         <div className="p-menu">
           {user.role === 'host' ? (<>
