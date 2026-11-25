@@ -267,6 +267,7 @@ export const DEFAULT_SETTINGS = {
   min_withdraw_inr: '2000',  // hosts can withdraw once their balance is worth this many rupees
   payout_sla_hours: '18',    // withdrawals are paid within this many hours
   chat_limit: '3',           // text messages each side may send in one chat (0 = no limit); calls stay open
+  chat_max_chars: '10',     // longest chat message, in characters (0 = no limit)
   contact_block_after: '1',  // a host or member is banned automatically after this many contact-sharing attempts (0 = never)
   require_host_verification: '1', // hosts must pass ID + gender verification before going online
 };

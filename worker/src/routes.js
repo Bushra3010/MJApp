@@ -527,7 +527,7 @@ export function buildApi(h) {
   const chatQuota = (conv, senderId) => {
     const limit = h.setting('chat_limit');
     const sent = db.prepare("SELECT COUNT(*) n FROM messages WHERE conversation_id = ? AND sender_id = ? AND type = 'text'").get(conv.id, senderId).n;
-    return { limit, sent, left: limit > 0 ? Math.max(0, limit - sent) : null };
+    return { limit, sent, left: limit > 0 ? Math.max(0, limit - sent) : null, maxChars: h.setting('chat_max_chars') || 0 };
   };
   app.post('/conversations/:id/messages', auth('user', 'host'), R(async (c) => {
     const conv = convFor(c, c.req.param('id'));
@@ -537,6 +537,7 @@ export function buildApi(h) {
     const u = c.get('user');
     const q = chatQuota(conv, u.id);
     if (q.left === 0) throw Object.assign(bad(`Chat limit reached (${q.limit} messages). Continue with an audio or video call.`, 403), { extra: { code: 'CHAT_LIMIT' } });
+    if (q.maxChars > 0 && [...text].length > q.maxChars) throw Object.assign(bad(`Messages can be at most ${q.maxChars} letters. Talk on a call for more.`), { extra: { code: 'TOO_LONG' } });
     const why = findContact(text);
     if (why) {
       if (recordViolation(u, conv.id, text, why)) throw Object.assign(bad(BANNED_ERROR, 403), { extra: { code: 'BANNED' } });

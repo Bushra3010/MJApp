@@ -121,7 +121,8 @@ export default function ChatThread() {
       ) : (
       <form className="composer" onSubmit={send}>
         {isUser && <button type="button" className="gift-btn" aria-label="Send a gift" onClick={() => api('/gifts').then(setGifts)}><Icon name="gift" size={22} /></button>}
-        <input className="input" placeholder={isUser && cfg.chatCost > 0 ? `Message · ${cfg.chatCost} coin` : 'Message'} value={text} onChange={onType} maxLength={2000} />
+        <input className="input" placeholder={isUser && cfg.chatCost > 0 ? `Message · ${cfg.chatCost} coin` : 'Message'} value={text} onChange={onType} maxLength={conv.chat?.maxChars > 0 ? conv.chat.maxChars : 2000} />
+        {conv.chat?.maxChars > 0 && <span className="chat-count" aria-live="polite">{[...text].length}/{conv.chat.maxChars}</span>}
         <button className="send" aria-label="Send" disabled={!text.trim()}><Icon name="send" size={20} /></button>
       </form>
       )}

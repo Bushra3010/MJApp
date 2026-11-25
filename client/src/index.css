@@ -969,3 +969,4 @@ table.t .avatar { width: 34px; height: 34px; }
 .offer-card .oc-txt b { font-size: 15px; }
 .offer-card .oc-txt span { font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 4px; }
 .offer-card .oc-go { flex: none; display: flex; align-items: center; gap: 2px; padding: 8px 12px; border-radius: 999px; font-weight: 800; font-size: 13px; color: #fff; background: linear-gradient(135deg, #ff8a3d, #f41470); }
+.composer .chat-count { flex: none; font-size: 12px; color: var(--text-2); min-width: 34px; text-align: center; }

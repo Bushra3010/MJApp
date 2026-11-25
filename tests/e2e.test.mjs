@@ -97,6 +97,8 @@ try {
   assert.equal(plainBoss.user.role, 'user'); ok('admin email signing up on the friends app gets a normal member account');
   await req('/me', { method: 'DELETE', body: { password: 'boss-pass-123' } }, plainBoss);
   const A = (await signup({ email: 'boss@test.io', password: 'boss-pass-123' }, 'admin')).body;
+  // the 10-letter message cap is tested on its own below; older checks send longer messages
+  await req('/admin/settings', { method: 'PATCH', body: { chat_max_chars: 0 } }, A);
   assert.equal(A.user.role, 'admin'); ok('admin account created only through the admin app');
   assert.equal((await req('/admin/seed-demo', { method: 'POST' }, A)).status, 200);
   // the paid-call tests below assume no free trial; the free-trial block switches it on for its own checks
@@ -627,6 +629,12 @@ try {
     assert.equal(r.status, 400); assert.equal(r.body.code, 'NO_NUMBERS');
   }
   ok('no digits of any kind can be sent in chat (stops numbers sent in pieces)');
+  await req('/admin/settings', { method: 'PATCH', body: { chat_max_chars: 10 } }, A);
+  const longR = await req(`/conversations/${cvU.id}/messages`, { method: 'POST', body: { body: 'hello there friend' } }, UV);
+  assert.equal(longR.status, 400); assert.equal(longR.body.code, 'TOO_LONG');
+  assert.equal((await req(`/conversations/${cvU.id}`, {}, UV)).body.chat.maxChars, 10);
+  assert.equal((await req(`/conversations/${cvU.id}/messages`, { method: 'POST', body: { body: 'hi dear 🙂' } }, UV)).status, 200); ok('chat messages are capped at 10 letters (admin setting)');
+  await req('/admin/settings', { method: 'PATCH', body: { chat_max_chars: 0 } }, A);
   await req('/admin/settings', { method: 'PATCH', body: { contact_block_after: 1 } }, A);
   const banU = (await signup({ name: 'Leaky Member' }, 'user')).body;
   const cvB = (await req('/conversations', { method: 'POST', body: { hostId: HL.user.id } }, banU)).body;
