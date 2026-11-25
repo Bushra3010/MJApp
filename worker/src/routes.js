@@ -542,6 +542,8 @@ export function buildApi(h) {
       if (recordViolation(u, conv.id, text, why)) throw Object.assign(bad(BANNED_ERROR, 403), { extra: { code: 'BANNED' } });
       throw Object.assign(bad(CONTACT_ERROR), { extra: { code: 'CONTACT_BLOCKED' } });
     }
+    // no numbers at all in chat (any script: 0-9, ०-९, ①, ¹…), so a phone number can't be sent in pieces
+    if (/\p{N}/u.test(text)) throw Object.assign(bad("Numbers can't be sent in chat. Write it in words or talk on a call."), { extra: { code: 'NO_NUMBERS' } });
     if (u.role === 'user') {
       const cost = h.setting('chat_cost');
       if (cost > 0) {

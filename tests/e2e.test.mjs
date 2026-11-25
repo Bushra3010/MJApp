@@ -622,6 +622,11 @@ try {
   assert.equal((await req(`/conversations/${cv.id}/messages`, { method: 'POST', body: { body: 'call 9876543210' } }, U)).status, 404);
   const cvU = (await req('/conversations', { method: 'POST', body: { hostId: HL.user.id } }, UV)).body;
   assert.equal((await req(`/conversations/${cvU.id}/messages`, { method: 'POST', body: { body: 'call me 9876543210' } }, UV)).body.code, 'CONTACT_BLOCKED'); ok('members cannot send numbers either');
+  for (const t of ['999', 'my age 7655 ok', '९८७', '①②']) {
+    const r = await req(`/conversations/${cvU.id}/messages`, { method: 'POST', body: { body: t } }, UV);
+    assert.equal(r.status, 400); assert.equal(r.body.code, 'NO_NUMBERS');
+  }
+  ok('no digits of any kind can be sent in chat (stops numbers sent in pieces)');
   await req('/admin/settings', { method: 'PATCH', body: { contact_block_after: 1 } }, A);
   const banU = (await signup({ name: 'Leaky Member' }, 'user')).body;
   const cvB = (await req('/conversations', { method: 'POST', body: { hostId: HL.user.id } }, banU)).body;
