@@ -4,6 +4,33 @@ import { api, timeAgo } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Avatar from '../components/Avatar.jsx';
+import Icon from '../components/Icon.jsx';
+import { useHosts, isFree } from '../lib/hosts.js';
+import { useStartCall } from '../lib/recharge.jsx';
+
+function OnlineNow() {
+  const hosts = useHosts('', 60_000);
+  const call = useStartCall();
+  const free = (hosts || []).filter((h) => isFree(h, 'video'));
+  return (<>
+    <div className="msg-quick">
+      <Link to="/contact" className="mq press"><span className="ic green"><Icon name="shield" size={20} /></span>Support</Link>
+      <Link to="/app/calls" className="mq press"><span className="ic violet"><Icon name="history" size={20} /></span>Calls</Link>
+      <Link to="/app/match" className="mq press"><span className="ic pink"><Icon name="heart" size={20} /></span>Match</Link>
+    </div>
+    {free.length > 0 && <>
+      <div className="online-strip-title"><i className="live-dot" />Online now · tap to video call</div>
+      <div className="online-strip">
+        {free.map((h) => (
+          <button key={h.id} className="os-item press" onClick={() => call({ id: h.id, name: h.name, avatar: h.avatar }, 'video')} aria-label={`Video call ${h.name}`}>
+            <span className="os-ring"><Avatar src={h.avatar} name={h.name} size={58} online busy={false} /></span>
+            <span className="os-name">{h.name}</span>
+          </button>
+        ))}
+      </div>
+    </>}
+  </>);
+}
 
 export function preview(c) {
   if (c.last_type === 'gift') { try { const g = JSON.parse(c.last_body); return `${g.emoji} Sent a ${g.name}`; } catch { return '🎁 Gift'; } }
@@ -24,8 +51,9 @@ export default function Chats() {
 
   return (
     <>
-      <TopBar title="Chats" />
+      <TopBar title={user.role === 'user' ? 'Messages' : 'Chats'} />
       <div className="page">
+        {user.role === 'user' && <OnlineNow />}
         {!list ? <div className="spinner" /> : list.length === 0 ? (
           <div className="empty"><div className="big">💬</div><b>No chats yet</b><p>{user.role === 'host' ? 'When users message you, they show up here.' : 'Find someone on Discover and say hi.'}</p></div>
         ) : <div className="chat-list">{list.map((c, i) => (

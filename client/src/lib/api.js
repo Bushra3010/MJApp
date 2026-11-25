@@ -1,9 +1,11 @@
+import { deviceId } from './device.js';
+
 // Sessions live in an http-only cookie set by the server; nothing sensitive is stored in the browser.
 export async function api(path, { method = 'GET', body, form } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
     credentials: 'same-origin',
-    headers: form ? {} : { 'content-type': 'application/json' },
+    headers: { 'x-mj-device': deviceId(), ...(form ? {} : { 'content-type': 'application/json' }) },
     body: form || (body ? JSON.stringify(body) : undefined),
   });
   const data = await res.json().catch(() => ({}));

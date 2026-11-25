@@ -51,6 +51,24 @@ export default function Me() {
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPhoto} />
       </div>
       <div className="p-body">
+        {user.role === 'user' && <>
+          <Link to="/app/wallet" className="me-wallet press">
+            <span className="row" style={{ fontWeight: 800 }}><Icon name="wallet" size={18} />My Wallet</span>
+            <span className="row"><Coins value={user.coins} className="big" /><span className="spacer" /><span className="chip">Recharge</span><Icon name="chevron" size={18} /></span>
+          </Link>
+          <div className="me-grid">
+            {[
+              ['/contact', 'shield', 'Live support', 'green'],
+              ['/app/wallet?f=topup', 'plus', 'Top-up record', 'amber'],
+              ['/app/wallet?f=spend', 'coin', 'Spending history', 'violet'],
+              ['/app/calls', 'history', 'Call history', 'pink'],
+              ['/app/match', 'heart', 'Match', 'pink'],
+              ['/app/settings', 'gear', 'Settings', 'green'],
+            ].map(([to, ic, label, tone]) => (
+              <Link key={label} to={to} className="me-tile press"><span className={`ic ${tone}`}><Icon name={ic} size={22} /></span>{label}</Link>
+            ))}
+          </div>
+        </>}
         {editing ? (
           <form onSubmit={save} className="rise">
             <div className="field"><label htmlFor="n">Name</label><input id="n" className="input" value={f.name} onChange={set('name')} /></div>
@@ -66,22 +84,19 @@ export default function Me() {
         </>)}
         <div className="p-label">Account</div>
         <div className="p-menu">
-          {user.role === 'user' && (
-            <Link to="/app/wallet" className="menu-row"><span className="ic amber"><Icon name="wallet" size={20} /></span><span className="t">Wallet<small>Balance and coin history</small></span><Coins value={user.coins} /><Icon name="chevron" size={18} className="chev" /></Link>
-          )}
           {user.role === 'host' ? (<>
             <button type="button" onClick={() => setEditing(true)} className="menu-row"><span className="ic violet"><Icon name="edit" size={20} /></span><span className="t">Edit profile<small>Name, city, about you</small></span><Icon name="chevron" size={18} className="chev" /></button>
             <button type="button" onClick={() => fileRef.current?.click()} className="menu-row"><span className="ic amber"><Icon name="camera" size={20} /></span><span className="t">Upload photo<small>A clear photo gets more calls</small></span><Icon name="chevron" size={18} className="chev" /></button>
             <Link to="/host/wallet" className="menu-row"><span className="ic green"><Icon name="wallet" size={20} /></span><span className="t">Wallet<small>Balance, withdraw, transactions</small></span><Coins value={user.host?.earnings ?? 0} /><Icon name="chevron" size={18} className="chev" /></Link>
-            <Link to="/host/rate" className="menu-row"><span className="ic amber"><Icon name="coin" size={20} /></span><span className="t">My call rate<small>Level ★ {user.host?.level ?? 1} · video {user.host?.video_rate}/min</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/host/rate" className="menu-row"><span className="ic amber"><Icon name="coin" size={20} /></span><span className="t">My level & rate<small>Level ★ {user.host?.level ?? 1} · rates rise with your level</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/host/reviews" className="menu-row"><span className="ic amber"><Icon name="star" size={20} /></span><span className="t">My ratings<small>Stars and reviews from members</small></span><Icon name="chevron" size={18} className="chev" /></Link>
+            <Link to="/host/calls" className="menu-row"><span className="ic violet"><Icon name="history" size={20} /></span><span className="t">Call history<small>Received and missed calls</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/invite" className="menu-row"><span className="ic violet"><Icon name="share" size={20} /></span><span className="t">Invite hosts & earn<small>Earn a share of what they make</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/bank" className="menu-row"><span className="ic green"><Icon name="cash" size={20} /></span><span className="t">Bank details<small>{user.host?.payout_method === 'upi' ? `UPI · ${user.host.upi_id}` : user.host?.payout_method === 'bank' ? `Bank ••••${user.host.bank_account_last4}` : 'Add where you get paid'}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/verification" className="menu-row"><span className="ic violet"><Icon name="verified" size={20} /></span><span className="t">Verification<small>{{ none: 'Not verified', pending: 'Under review', verified: 'Verified ✓', rejected: 'Not approved — try again' }[user.host?.kyc_status || 'none']}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/language" className="menu-row"><span className="ic amber"><Icon name="chat" size={20} /></span><span className="t">Language<small>{langs.join(', ') || 'Add languages you speak'}</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/contact" className="menu-row"><span className="ic green"><Icon name="shield" size={20} /></span><span className="t">Help & support<small>Contact us, policies</small></span><Icon name="chevron" size={18} className="chev" /></Link>
-          </>) : (
-            <Link to={`${base}/calls`} className="menu-row"><span className="ic violet"><Icon name="history" size={20} /></span><span className="t">Call history<small>Every call you've made</small></span><Icon name="chevron" size={18} className="chev" /></Link>
-          )}
+          </>) : null}
           <Link to={`${base}/settings`} className="menu-row"><span className="ic green"><Icon name="gear" size={20} /></span><span className="t">Settings & account<small>Notifications, password, privacy</small></span><Icon name="chevron" size={18} className="chev" /></Link>
           {user.role === 'host' && <button type="button" onClick={() => logout().then(() => nav('/'))} className="menu-row"><span className="ic red"><Icon name="logout" size={20} /></span><span className="t danger-text">Log out</span></button>}
         </div>

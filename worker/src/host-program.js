@@ -3,17 +3,16 @@
 
 const IST_MS = 330 * 60_000;
 
-/** Default levels for Milo Julo's coin economy. Admin can edit them (stored in meta 'levels'). */
+/**
+ * Host levels. A host moves up when their lifetime earnings (coins, `total_earned`) reach `target`, and never moves down.
+ *   audio_earn / video_earn — rupees the host earns per minute of call at this level
+ *   audio / video           — coins the member is charged per minute for this host
+ * Admin can edit the table (stored in meta 'levels_v2').
+ */
 export const DEFAULT_LEVELS = [
-  { level: 1, weekly: 0, video: 30, audio: 10 },
-  { level: 2, weekly: 500, video: 40, audio: 13 },
-  { level: 3, weekly: 1000, video: 50, audio: 16 },
-  { level: 4, weekly: 2000, video: 60, audio: 19 },
-  { level: 5, weekly: 3000, video: 70, audio: 22 },
-  { level: 6, weekly: 5000, video: 80, audio: 25 },
-  { level: 7, weekly: 10000, video: 90, audio: 28 },
-  { level: 8, weekly: 15000, video: 100, audio: 31 },
-  { level: 9, weekly: 20000, video: 120, audio: 35 },
+  { level: 1, target: 0, audio_earn: 3, video_earn: 8, audio: 10, video: 30 },
+  { level: 2, target: 70000, audio_earn: 4, video_earn: 9, audio: 12, video: 35 },
+  { level: 3, target: 300000, audio_earn: 5, video_earn: 10, audio: 14, video: 40 },
 ];
 
 const sqlTime = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
@@ -34,14 +33,16 @@ export function dayOf(now = Date.now()) {
 }
 
 export function levelsTable(db) {
-  const row = db.prepare("SELECT value FROM meta WHERE key = 'levels'").get();
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'levels_v2'").get();
   try { const t = row && JSON.parse(row.value); if (Array.isArray(t) && t.length) return t; } catch { /* default */ }
   return DEFAULT_LEVELS;
 }
 export function saveLevelsTable(db, table) {
-  db.prepare("INSERT INTO meta (key, value) VALUES ('levels', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(table));
+  db.prepare("INSERT INTO meta (key, value) VALUES ('levels_v2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(table));
 }
 export const tierOf = (table, level) => table.find((t) => t.level === level) || table[0];
+/** Level reached with this much lifetime earning. */
+export const levelFor = (table, totalEarned) => Math.max(1, ...table.filter((t) => totalEarned >= t.target).map((t) => t.level));
 
 /** Host earnings (coins) between two times, split into call / gift / other. */
 export function earningsBetween(db, hostId, startMs, endMs) {
@@ -59,48 +60,41 @@ export function addAlert(h, userId, kind, title, body = '', url = '') {
 }
 
 /**
- * Make sure the host's level is up to date for this week: level = highest tier whose weekly
- * threshold last week's earnings reached (or the admin's override). The chosen rate tier is
- * raised automatically on a level-up and capped on a level-down.
+ * Make sure the host's level matches their lifetime earnings (or the admin's override) and that their
+ * per-minute prices match that level. Levels only go up on their own. Hosts whose prices an admin set
+ * by hand (rate_custom) keep those prices.
  */
-export function ensureLevel(h, hostId, now = Date.now()) {
+export function ensureLevel(h, hostId) {
   const db = h.db;
-  const hp = db.prepare('SELECT level, rate_level, level_week, level_override FROM host_profiles WHERE user_id = ?').get(hostId);
+  const hp = db.prepare('SELECT level, level_override, total_earned, rate_custom, audio_rate, video_rate FROM host_profiles WHERE user_id = ?').get(hostId);
   if (!hp) return null;
-  const week = weekOf(now);
-  if (hp.level_week === week.id) return hp;
   const table = levelsTable(db);
-  const prev = weekOf(now, -1);
-  const lastWeek = earningsBetween(db, hostId, prev.startMs, prev.endMs).total;
-  const earned = table.filter((t) => lastWeek >= t.weekly).map((t) => t.level);
-  let level = earned.length ? Math.max(...earned) : 1;
-  if (hp.level_override) level = hp.level_override;
-  const firstTime = !hp.level_week;
-  if (firstTime) {
-    // First calculation (new host, or existing host when levels launched). New hosts start on tier 1;
-    // hosts whose rates were set by hand keep them, shown as a custom rate (rate_level 0) until they pick a tier.
-    const cur = db.prepare('SELECT video_rate, audio_rate FROM host_profiles WHERE user_id = ?').get(hostId);
-    const match = table.find((t) => t.level <= level && t.video === cur.video_rate && t.audio === cur.audio_rate);
-    const isDefault = cur.video_rate === h.setting('default_video_rate') && cur.audio_rate === h.setting('default_audio_rate');
-    if (match) db.prepare('UPDATE host_profiles SET level = ?, rate_level = ?, level_week = ? WHERE user_id = ?').run(level, match.level, week.id, hostId);
-    else if (isDefault) applyRate(h, hostId, 1, level, week.id);
-    else db.prepare('UPDATE host_profiles SET level = ?, rate_level = 0, level_week = ? WHERE user_id = ?').run(level, week.id, hostId);
-    return db.prepare('SELECT level, rate_level, level_week, level_override FROM host_profiles WHERE user_id = ?').get(hostId);
+  let level = hp.level_override || Math.max(levelFor(table, hp.total_earned || 0), Math.min(hp.level || 1, table.length));
+  level = Math.min(level, table.length);
+  const t = tierOf(table, level);
+  if (level !== hp.level || (!hp.rate_custom && (hp.audio_rate !== t.audio || hp.video_rate !== t.video))) {
+    applyRate(h, hostId, level);
+    if (level > (hp.level || 1) && !hp.level_override) {
+      addAlert(h, hostId, 'level', `You reached Level ${level}! 🎉`,
+        `You now earn ₹${t.video_earn}/min on video calls and ₹${t.audio_earn}/min on audio calls.`, '/host/rate');
+    }
   }
-  const rateLevel = level > (hp.level || 1) ? level : Math.min(hp.rate_level || level, level);
-  applyRate(h, hostId, rateLevel, level, week.id);
-  if (level !== hp.level) {
-    addAlert(h, hostId, 'level', level > hp.level ? `You reached Level ${level}! 🎉` : `You're now Level ${level}`,
-      `Your call rate is now ${tierOf(table, Math.min(rateLevel, level)).video}/min for video.`, '/host/rate');
-  }
-  return db.prepare('SELECT level, rate_level, level_week, level_override FROM host_profiles WHERE user_id = ?').get(hostId);
+  return db.prepare('SELECT level, rate_level, level_override FROM host_profiles WHERE user_id = ?').get(hostId);
 }
 
-/** Set the host's chosen rate tier (must be ≤ their level) and the per-minute rates that go with it. */
-export function applyRate(h, hostId, rateLevel, level, weekId) {
-  const t = tierOf(levelsTable(h.db), rateLevel);
-  h.db.prepare('UPDATE host_profiles SET level = COALESCE(?, level), rate_level = ?, video_rate = ?, audio_rate = ?, level_week = COALESCE(?, level_week) WHERE user_id = ?')
-    .run(level ?? null, t.level, t.video, t.audio, weekId ?? null, hostId);
+/** Put the host on a level and (unless an admin set custom prices) that level's per-minute prices. */
+export function applyRate(h, hostId, level) {
+  const t = tierOf(levelsTable(h.db), level);
+  const hp = h.db.prepare('SELECT rate_custom FROM host_profiles WHERE user_id = ?').get(hostId);
+  if (hp?.rate_custom) h.db.prepare('UPDATE host_profiles SET level = ?, rate_level = ? WHERE user_id = ?').run(t.level, t.level, hostId);
+  else h.db.prepare('UPDATE host_profiles SET level = ?, rate_level = ?, video_rate = ?, audio_rate = ? WHERE user_id = ?').run(t.level, t.level, t.video, t.audio, hostId);
+}
+
+/** Rupees per minute this host earns for a call type at their current level. */
+export function earnPerMinute(h, hostId, type) {
+  const hp = h.db.prepare('SELECT level FROM host_profiles WHERE user_id = ?').get(hostId);
+  const t = tierOf(levelsTable(h.db), hp?.level || 1);
+  return type === 'video' ? t.video_earn : t.audio_earn;
 }
 
 // ---------- online time ----------

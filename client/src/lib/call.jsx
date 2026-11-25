@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { api } from './api.js';
 import { useAuth } from './auth.jsx';
 import { emitAck } from './socket.js';
+import { deviceId } from './device.js';
 import { useToast } from './toast.jsx';
 
 const CallCtx = createContext(null);
@@ -43,6 +44,8 @@ export function CallProvider({ children }) {
   const callRef = useRef(IDLE);
   const ringer = useRef(makeRinger());
   callRef.current = call;
+  const roleRef = useRef(user?.role);
+  roleRef.current = user?.role;
 
   const getMedia = async (type) => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Calls need HTTPS (or localhost) and a modern browser');
@@ -74,7 +77,8 @@ export function CallProvider({ children }) {
     pc.current = peer;
     local.current?.getTracks().forEach((t) => peer.addTrack(t, local.current));
     peer.onicecandidate = (e) => e.candidate && signal({ type: 'candidate', candidate: e.candidate });
-    peer.ontrack = (e) => setRemoteStream(e.streams[0]);
+    // a fresh MediaStream object each time so <video>/<audio> pick up tracks added later (audio → video)
+    peer.ontrack = (e) => setRemoteStream(new MediaStream(e.streams[0].getTracks()));
     peer.onconnectionstatechange = () => {
       const st = peer.connectionState;
       if (st === 'connected') setCall((c) => ({ ...c, media: 'connected' }));
@@ -140,15 +144,39 @@ export function CallProvider({ children }) {
         disconnected: 'Call dropped', failed: 'Call failed to connect', cancelled: 'Call cancelled',
       }[s.reason];
       setCall((c) => ({ ...c, phase: 'ended', summary: { ...s, message: msg || 'Call ended' } }));
+      // Customers get a summary screen with who else is online; it stays until they close it.
+      if (roleRef.current === 'user') return;
       setTimeout(() => setCall((c) => (c.phase === 'ended' && c.callId === s.callId ? IDLE : c)), 2800);
     };
     const onSignal = ({ callId, data }) => { if (callId === callRef.current.callId) handleSignal(data); };
+    // ---- audio → video on the same call ----
+    const onUpgradeRequest = (p) => { if (p.callId === callRef.current.callId) setCall((c) => ({ ...c, upgradeRequest: { rate: p.rate } })); };
+    const onUpgradeDeclined = (p) => {
+      if (p.callId !== callRef.current.callId) return;
+      setCall((c) => ({ ...c, upgrade: null }));
+      toast(`${callRef.current.peer?.name || 'They'} would rather stay on audio`, 'info');
+    };
+    const onUpgraded = async (p) => {
+      if (p.callId !== callRef.current.callId) return;
+      setCall((c) => ({ ...c, type: 'video', rate: p.rate, upgrade: null, upgradeRequest: null }));
+      try {
+        await addCamera();
+        // the caller renegotiates; the host already added its camera before accepting
+        if (callRef.current.role === 'caller' && pc.current) {
+          const offer = await pc.current.createOffer();
+          await pc.current.setLocalDescription(offer);
+          signal({ type: 'offer', sdp: pc.current.localDescription });
+        }
+      } catch { toast('Could not turn on your camera — the other person can still see theirs', 'error'); }
+    };
     socket.on('call:incoming', onIncoming);
     socket.on('call:connected', onConnected);
     socket.on('call:tick', onTick);
     socket.on('call:ended', onEnded);
     socket.on('rtc:signal', onSignal);
+    socket.on('call:upgrade-request', onUpgradeRequest); socket.on('call:upgrade-declined', onUpgradeDeclined); socket.on('call:upgraded', onUpgraded);
     return () => {
+      socket.off('call:upgrade-request', onUpgradeRequest); socket.off('call:upgrade-declined', onUpgradeDeclined); socket.off('call:upgraded', onUpgraded);
       socket.off('call:incoming', onIncoming); socket.off('call:connected', onConnected);
       socket.off('call:tick', onTick); socket.off('call:ended', onEnded); socket.off('rtc:signal', onSignal);
     };
@@ -171,10 +199,10 @@ export function CallProvider({ children }) {
       toast(e.name === 'NotAllowedError' ? 'Allow microphone' + (type === 'video' ? ' and camera' : '') + ' to call' : e.message, 'error');
       return;
     }
-    const res = await emitAck('call:start', { hostId: host.id, type });
+    const res = await emitAck('call:start', { hostId: host.id, type, device: deviceId() });
     if (res?.error) {
       cleanup(); setCall(IDLE);
-      toast(res.error, 'error');
+      if (res.code !== 'LOW_BALANCE') toast(res.error, 'error');
       return res;
     }
     setCall({ phase: 'outgoing', callId: res.callId, type, rate: res.rate, peer: res.host, status: 'Ringing…', freeTrialMs: res.freeTrialMs || 0 });
@@ -203,6 +231,36 @@ export function CallProvider({ children }) {
     if (c.callId) socket.emit('call:end', { callId: c.callId });
     else { cleanup(); setCall(IDLE); }
   };
+  /** Add the camera to a running call (used when an audio call becomes video). */
+  const addCamera = async () => {
+    if (local.current?.getVideoTracks().length) return;
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
+    const vt = s.getVideoTracks()[0];
+    if (!local.current) local.current = new MediaStream();
+    local.current.addTrack(vt);
+    pc.current?.addTrack(vt, local.current);
+    setLocalStream(new MediaStream(local.current.getTracks()));
+  };
+  /** Member: ask the host to switch this audio call to video. */
+  const requestVideo = async () => {
+    const c = callRef.current;
+    if (c.phase !== 'active' || c.type !== 'audio' || c.upgrade) return;
+    setCall((x) => ({ ...x, upgrade: 'waiting' }));
+    const res = await emitAck('call:upgrade', { callId: c.callId });
+    if (res?.error) { setCall((x) => ({ ...x, upgrade: null })); toast(res.error, 'error'); }
+    return res;
+  };
+  /** Host: answer the switch-to-video request. The camera is turned on before saying yes. */
+  const answerVideo = async (accept) => {
+    const c = callRef.current;
+    setCall((x) => ({ ...x, upgradeRequest: null }));
+    if (accept) {
+      try { await addCamera(); } catch { toast('Allow the camera to switch to video', 'error'); accept = false; }
+    }
+    const res = await emitAck('call:upgrade-answer', { callId: c.callId, accept });
+    if (res?.error) toast(res.error, 'error');
+  };
+  const dismiss = () => { if (callRef.current.phase === 'ended') setCall(IDLE); };
   const toggleMute = () => {
     const t = local.current?.getAudioTracks()[0]; if (!t) return;
     t.enabled = !t.enabled; setCall((c) => ({ ...c, muted: !t.enabled }));
@@ -224,7 +282,7 @@ export function CallProvider({ children }) {
   };
 
   return (
-    <CallCtx.Provider value={{ call, localStream, remoteStream, startCall, accept, decline, hangup, toggleMute, toggleCam, flipCam, me: user }}>
+    <CallCtx.Provider value={{ call, localStream, remoteStream, startCall, accept, decline, hangup, dismiss, requestVideo, answerVideo, toggleMute, toggleCam, flipCam, me: user }}>
       {children}
     </CallCtx.Provider>
   );

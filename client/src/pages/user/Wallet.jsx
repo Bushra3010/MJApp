@@ -6,6 +6,8 @@ import TopBar from '../../components/TopBar.jsx';
 import Coins from '../../components/Coins.jsx';
 import { buyPack } from '../../lib/razorpay.js';
 import Icon from '../../components/Icon.jsx';
+import PackList from '../../components/PackList.jsx';
+import { useSearchParams } from 'react-router-dom';
 
 const KIND = { payout_reversed: 'Payout returned', purchase: 'Bought coins', bonus: 'Bonus', call: 'Call', chat: 'Chat', gift: 'Gift', admin_credit: 'Added by support', admin_debit: 'Adjusted by support' };
 
@@ -15,6 +17,9 @@ export default function Wallet() {
   const [w, setW] = useState(null);
   const [cfg, setCfg] = useState({});
   const [buying, setBuying] = useState(null);
+  const [params, setParams] = useSearchParams();
+  const f = params.get('f') || 'all';
+  const txns = (w?.transactions || []).filter((t) => f === 'all' || (f === 'topup' ? t.amount > 0 : t.amount < 0));
   const load = () => api('/wallet').then(setW);
   useEffect(() => { load(); api('/config').then(setCfg); }, [user.coins]);
 
@@ -39,18 +44,15 @@ export default function Wallet() {
         {cfg.payments === 'test' && <div className="test-banner">Test mode: packs are credited instantly without payment. Add your Razorpay keys to take real payments.</div>}
         {cfg.payments === 'off' && <div className="test-banner">Buying coins is temporarily unavailable.</div>}
         <div className="section-title">Add coins</div>
-        <div className="pack-grid">
-          {(w?.packs || cfg.packs || []).map((p) => (
-            <button key={p.id} className={`card pack ${p.tag ? 'hot' : ''}`} onClick={() => buy(p)} disabled={!!buying || cfg.payments === 'off'}>
-              {p.tag && <span className="tag">{p.tag}</span>}
-              <div className="c coin">{p.coins.toLocaleString('en-IN')}</div>
-              <div className="p">{buying === p.id ? 'Opening…' : `₹${p.price}`}</div>
-            </button>
+        <PackList packs={w?.packs || cfg.packs || []} onBuy={buy} buying={buying} disabled={cfg.payments === 'off'} />
+        <p className="faint" style={{ marginTop: 10, marginBottom: 8 }}>Secure payments by Razorpay · UPI, cards, netbanking, wallets. <a className="link" href="/refunds">Refund policy</a></p>
+        <div className="section-title">Every coin, accounted for</div>
+        <div className="filters">
+          {[['all', 'All'], ['topup', 'Top-up record'], ['spend', 'Spending history']].map(([k, l]) => (
+            <button key={k} className={f === k ? 'on' : ''} aria-pressed={f === k} onClick={() => setParams(k === 'all' ? {} : { f: k }, { replace: true })}>{l}</button>
           ))}
         </div>
-        <p className="faint" style={{ marginTop: -10, marginBottom: 8 }}>Secure payments by Razorpay · UPI, cards, netbanking, wallets. <a className="link" href="/refunds">Refund policy</a></p>
-        <div className="section-title">Every coin, accounted for</div>
-        {!w ? <div className="spinner" /> : w.transactions.length === 0 ? <p className="faint">No transactions yet.</p> : <div className="card txn-list">{w.transactions.map((t) => (
+        {!w ? <div className="spinner" /> : txns.length === 0 ? <p className="faint">Nothing here yet.</p> : <div className="card txn-list">{txns.map((t) => (
           <div key={t.id} className="txn">
             <span className={`ic ${t.amount > 0 ? 'plus' : ''}`}><Icon name={t.kind === 'call' ? 'phone' : t.kind === 'chat' ? 'chat' : t.kind === 'gift' ? 'gift' : t.amount > 0 ? 'plus' : 'coin'} size={18} /></span>
             <div style={{ minWidth: 0, flex: 1 }}>

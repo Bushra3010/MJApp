@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, clock } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
-import { useCall } from '../lib/call.jsx';
+import { useStartCall } from '../lib/recharge.jsx';
 import { useToast } from '../lib/toast.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Icon from '../components/Icon.jsx';
@@ -13,7 +13,7 @@ import ReportSheet from '../components/ReportSheet.jsx';
 export default function ChatThread() {
   const { id } = useParams();
   const { user, socket } = useAuth();
-  const { startCall } = useCall();
+  const startCall = useStartCall();
   const toast = useToast();
   const nav = useNavigate();
   const [conv, setConv] = useState(null);
@@ -56,17 +56,26 @@ export default function ChatThread() {
     e.preventDefault();
     const body = text.trim(); if (!body) return;
     setText('');
-    try { const m = await api(`/conversations/${id}/messages`, { method: 'POST', body: { body } }); setMsgs((x) => (x.some((y) => y.id === m.id) ? x : [...x, m])); }
-    catch (err) { setText(body); toast(err.message, 'error'); if (err.status === 402) nav('/app/wallet'); }
+    try {
+      const m = await api(`/conversations/${id}/messages`, { method: 'POST', body: { body } });
+      setMsgs((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]));
+      setConv((c) => (c?.chat?.left > 0 ? { ...c, chat: { ...c.chat, sent: c.chat.sent + 1, left: c.chat.left - 1 } } : c));
+    } catch (err) {
+      if (err.data?.code === 'CHAT_LIMIT') setConv((c) => ({ ...c, chat: { ...c.chat, left: 0 } }));
+      else setText(body);
+      toast(err.message, 'error');
+      if (err.status === 402) nav('/app/wallet');
+    }
   };
   const sendGift = async (g) => {
     try { await api(`/conversations/${id}/gift`, { method: 'POST', body: { giftId: g.id } }); setGifts(null); toast(`${g.emoji} ${g.name} sent!`, 'success'); }
     catch (err) { toast(err.message, 'error'); if (err.status === 402) nav('/app/wallet'); }
   };
-  const call = (type) => startCall({ id: conv.other.id, name: conv.other.name, avatar: conv.other.avatar }, type).then((r) => { if (r?.code === 'LOW_BALANCE') nav('/app/wallet'); });
+  const call = (type) => startCall({ id: conv.other.id, name: conv.other.name, avatar: conv.other.avatar }, type);
 
   if (!conv) return <div className="spinner" />;
   const avail = conv.host.online && !conv.host.busy;
+  const limitHit = conv.chat?.left === 0;
 
   return (
     <div className="chat">
@@ -75,7 +84,7 @@ export default function ChatThread() {
         <Avatar src={conv.other.avatar} name={conv.other.name} size={40} online={isUser ? !!conv.host.online : undefined} busy={!!conv.host.busy} />
         <div style={{ minWidth: 0 }}>
           <b style={{ display: 'block' }}>{conv.other.name}</b>
-          <span className="faint">{typing ? 'typing…' : isUser ? (avail ? 'Online' : conv.host.busy ? 'On a call' : 'Offline') : conv.other.city || 'Customer'}</span>
+          <span className="faint">{typing ? 'typing…' : isUser ? (avail ? 'Online' : conv.host.busy ? 'On a call' : 'Offline') : (conv.otherOnline ? 'Online' : 'Offline')}</span>
         </div>
         <div className="spacer" />
         {isUser && <>
@@ -98,11 +107,24 @@ export default function ChatThread() {
         {typing && <div className="bubble them typing" aria-label="typing"><i /><i /><i /></div>}
         <div ref={end} />
       </div>
+      {conv.chat?.limit > 0 && !limitHit && <div className="chat-quota">{conv.chat.left} of {conv.chat.limit} messages left · then continue on a call</div>}
+      {limitHit ? (
+        <div className="chat-limit">
+          <b>Chat limit reached</b>
+          <span>{isUser ? `Keep talking to ${conv.other.name} on a call.` : 'You can keep talking when they call you.'} Sharing phone numbers or WhatsApp is not allowed.</span>
+          {isUser && <div className="row" style={{ gap: 8 }}>
+            <button className="btn btn-sm btn-outline" disabled={!avail} onClick={() => call('audio')}><Icon name="phone" size={16} />Audio call</button>
+            <button className="btn btn-sm btn-primary" disabled={!avail} onClick={() => call('video')}><Icon name="video" size={16} />Video call</button>
+            <button className="btn btn-sm btn-outline" onClick={() => api('/gifts').then(setGifts)} aria-label="Send a gift"><Icon name="gift" size={16} /></button>
+          </div>}
+        </div>
+      ) : (
       <form className="composer" onSubmit={send}>
         {isUser && <button type="button" className="gift-btn" aria-label="Send a gift" onClick={() => api('/gifts').then(setGifts)}><Icon name="gift" size={22} /></button>}
         <input className="input" placeholder={isUser && cfg.chatCost > 0 ? `Message · ${cfg.chatCost} coin` : 'Message'} value={text} onChange={onType} maxLength={2000} />
         <button className="send" aria-label="Send" disabled={!text.trim()}><Icon name="send" size={20} /></button>
       </form>
+      )}
       {gifts && (
         <Sheet title={`Send ${conv.other.name} a gift`} onClose={() => setGifts(null)}>
           <p className="faint" style={{ marginBottom: 12 }}>Your balance: <Coins value={user.coins} /></p>

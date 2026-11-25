@@ -211,6 +211,35 @@ const SCHEMA = [
   INSERT INTO offers (title, body, tone, sort) VALUES
     ('Daily bonus', 'Stay online and take calls every day. Top daily performers get bonus coins — check Alerts for your bonus.', 'pink', 1),
     ('Weekly bonus', 'The top 10 earners of the week win a bonus. Tap the trophy to see this week''s leaderboard.', 'gold', 2);`,
+  // v7 — host rework: lifetime levels with ₹/min host earnings, audio→video upgrade, reviews, contact-sharing protection,
+  //      one free call per device, verified gender, block reasons
+  `ALTER TABLE host_profiles ADD COLUMN rate_custom INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE host_profiles ADD COLUMN gender_verified INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE live_calls ADD COLUMN earned INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE live_calls ADD COLUMN upgrade_pending INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE live_calls ADD COLUMN trial_device TEXT;
+  ALTER TABLE users ADD COLUMN block_reason TEXT;
+  CREATE TABLE IF NOT EXISTS trial_devices (device TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+  CREATE TABLE IF NOT EXISTS host_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id INTEGER NOT NULL UNIQUE,
+    host_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_reviews_host ON host_reviews(host_id, id);
+  CREATE TABLE IF NOT EXISTS contact_violations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id INTEGER,
+    body TEXT NOT NULL, reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_violations_user ON contact_violations(user_id);
+  UPDATE host_profiles SET level = 1, rate_level = 1, level_override = NULL;`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -219,7 +248,12 @@ export const DEFAULT_SETTINGS = {
   free_trial_enabled: '1',   // first call for a new member starts with free seconds
   free_trial_seconds: '30',
   referral_pct: '10',        // inviting host earns this % of their invitee's earnings (paid by the platform)
-  min_withdraw: '100',       // minimum coins per withdrawal
+  min_withdraw: '100',       // (old) minimum coins per withdrawal — replaced by min_withdraw_inr
+  min_withdraw_inr: '2000',  // hosts can withdraw once their balance is worth this many rupees
+  payout_sla_hours: '18',    // withdrawals are paid within this many hours
+  chat_limit: '3',           // text messages each side may send in one chat (0 = no limit); calls stay open
+  contact_block_after: '3',  // a host is blocked automatically after this many contact-sharing attempts (0 = never)
+  require_host_verification: '1', // hosts must pass ID + gender verification before going online
 };
 
 /** Host profile as the host (or the public) may see it: bank account number masked. */

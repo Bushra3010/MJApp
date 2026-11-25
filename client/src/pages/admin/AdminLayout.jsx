@@ -4,7 +4,7 @@ import Icon from '../../components/Icon.jsx';
 
 const links = [
   ['/admin', 'Dashboard', 'chart', true], ['/admin/users', 'Users', 'users'], ['/admin/hosts', 'Hosts', 'star'],
-  ['/admin/calls', 'Calls', 'phone'], ['/admin/reports', 'Reports', 'flag'], ['/admin/payouts', 'Payouts', 'cash'], ['/admin/content', 'Offers & videos', 'play'], ['/admin/settings', 'Settings', 'gear'],
+  ['/admin/calls', 'Calls', 'phone'], ['/admin/reports', 'Reports', 'flag'], ['/admin/safety', 'Safety', 'shield'], ['/admin/payouts', 'Payouts', 'cash'], ['/admin/content', 'Offers & videos', 'play'], ['/admin/settings', 'Settings', 'gear'],
 ];
 export default function AdminLayout() {
   const { logout } = useAuth();

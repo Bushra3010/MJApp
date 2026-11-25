@@ -12,24 +12,15 @@ import Icon from '../../components/Icon.jsx';
 
 const TABS = [['page', 'My Page'], ['stats', 'Stats'], ['offers', 'Offers'], ['help', 'Help videos']];
 export const compact = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${+(n / 1e3).toFixed(2)}K` : String(n));
-const pad = (n) => String(n).padStart(2, '0');
-
-function useCountdown(endMs) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
-  const left = Math.max(0, (endMs || 0) - now);
-  return { d: Math.floor(left / 86_400_000), h: Math.floor(left / 3_600_000) % 24, m: Math.floor(left / 60_000) % 60 };
-}
 
 export function LevelProgress({ prog, compactView = false }) {
-  const t = useCountdown(prog.weekEndsAt);
   const next = prog.next;
-  const pct = next ? Math.min(100, (prog.weekEarning / next.weekly) * 100) : 100;
-  const nextMonday = new Date(prog.weekEndsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
+  const cur = prog.levels.find((t) => t.level === prog.level) || prog.levels[0];
+  const from = cur?.target || 0;
+  const pct = next ? Math.min(100, Math.max(0, ((prog.totalEarned - from) / (next.target - from)) * 100)) : 100;
   return (
     <div className="card lvl-card">
-      <span className="lvl-time">Time left: {pad(t.d)} Days: {pad(t.h)} Hrs: {pad(t.m)} mins</span>
-      <div className="row" style={{ marginTop: 12 }}>
+      <div className="row">
         <b className="lvl-title">Level progress</b><div className="spacer" />
         <span className="lvl-badge">★ {prog.level}</span>
         {next && <><span aria-hidden="true">→</span><span className="lvl-badge locked"><Icon name="lock" size={12} /> ★ {next.level}</span></>}
@@ -37,10 +28,10 @@ export function LevelProgress({ prog, compactView = false }) {
       <div className="lvl-bar" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Progress to next level"><span style={{ width: `${pct}%` }} /></div>
       {next ? (<>
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="lvl-amt"><Coins value={compact(prog.weekEarning)} /> <small>/ {compact(next.weekly)}</small></span>
-          <span className="lvl-need">+{compact(Math.max(0, next.weekly - prog.weekEarning))} to unlock Lvl {next.level}</span>
+          <span className="lvl-amt"><Coins value={compact(prog.totalEarned)} /> <small>/ {compact(next.target)}</small></span>
+          <span className="lvl-need">+{compact(Math.max(0, next.target - prog.totalEarned))} to Level {next.level}</span>
         </div>
-        {!compactView && <p className="faint" style={{ marginTop: 8 }}>Unlock Level {next.level} to earn up to <Coins value={next.video} />/min from next week (starting {nextMonday}).</p>}
+        {!compactView && <p className="faint" style={{ marginTop: 8 }}>At Level {next.level} you earn ₹{next.audio_earn}/min on audio and ₹{next.video_earn}/min on video calls.</p>}
       </>) : <p className="muted" style={{ marginTop: 6 }}>You're at the top level 🏆</p>}
     </div>
   );
@@ -84,7 +75,16 @@ function MyPage() {
       </div>
     );
   }
+  const kyc = host.kyc_status || 'none';
   return (<>
+    {kyc !== 'verified' && (
+      <Link to="/host/verification" className={`card verify-banner ${kyc}`}>
+        <Icon name="shield" size={22} />
+        <div><b>{kyc === 'pending' ? 'Verification under review' : kyc === 'rejected' ? 'Verification not approved' : 'Verify your identity to start working'}</b>
+          <span>{kyc === 'pending' ? 'We check your ID and gender. You can go online once approved.' : 'Upload a photo ID and a selfie. Only verified hosts can go online — members see a verified badge.'}</span></div>
+        <Icon name="chevron" size={18} />
+      </Link>
+    )}
     <div className="card mp-card">
       <div className={`mp-status ${online ? 'on' : ''}`}>
         <i />
@@ -106,7 +106,7 @@ function MyPage() {
     {prog && (
       <Link to="/host/rate" className="card menu-row" style={{ marginTop: 12 }}>
         <span className="ic violet"><Icon name="coin" size={20} /></span>
-        <span className="t">My call rate<small>Video <Coins value={prog.videoRate} />/min · Audio <Coins value={prog.audioRate} />/min</small></span>
+        <span className="t">My level & rate<small>Level {prog.level} · you earn ₹{prog.earnVideo}/min video · ₹{prog.earnAudio}/min audio</small></span>
         <Icon name="chevron" size={18} className="chev" />
       </Link>
     )}
@@ -129,7 +129,7 @@ function StatsTab() {
         <div><span>Week's earning</span><b><Coins value={s.weekBreakdown.total} /></b></div>
       </div>
       <div className="st-withdraw">
-        {toWithdraw > 0 ? <>Earn <Coins value={compact(toWithdraw)} /> more to withdraw</> : <>You can withdraw now · <Link className="link" to="/host/wallet">Wallet →</Link></>}
+        {toWithdraw > 0 ? <>Earn <Coins value={compact(toWithdraw)} /> more to withdraw{s.minWithdrawInr > 0 ? ` (minimum ₹${s.minWithdrawInr.toLocaleString('en-IN')})` : ''}</> : <>You can withdraw now · <Link className="link" to="/host/wallet">Wallet →</Link></>}
         <div className="lvl-bar"><span style={{ width: `${Math.min(100, (s.profile.earnings / s.minWithdraw) * 100)}%` }} /></div>
       </div>
       <b className="st-h">Today</b>

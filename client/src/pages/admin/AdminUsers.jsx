@@ -18,6 +18,12 @@ export default function AdminUsers() {
     if (status === 'blocked' && !confirm(`Block ${u.name}? They will be logged out.`)) return;
     try { await api(`/admin/users/${u.id}`, { method: 'PATCH', body: { status } }); load(); } catch (e) { toast(e.message, 'error'); }
   };
+  const remove = async (u) => {
+    const typed = prompt(`Permanently delete ${u.name}${u.email ? ` (${u.email})` : ''}?\n\nTheir account, chats, photos and reviews are removed and cannot be restored. Call and payment records stay, anonymised.\n\nType DELETE to confirm.`);
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'DELETE') { toast('Not deleted — type DELETE to confirm', 'error'); return; }
+    try { await api(`/admin/users/${u.id}`, { method: 'DELETE' }); toast(`${u.name} deleted`, 'success'); load(); } catch (e) { toast(e.message, 'error'); }
+  };
   const doCredit = async (e) => {
     e.preventDefault();
     try { await api(`/admin/users/${credit.id}/credit`, { method: 'POST', body: { amount: Number(amt) } }); toast('Balance updated', 'success'); setCredit(null); setAmt(''); load(); }
@@ -40,6 +46,7 @@ export default function AdminUsers() {
                 <button className="btn btn-ghost btn-sm" onClick={() => setCredit(u)}>Coins</button>
                 {u.status === 'active' ? <button className="btn btn-outline btn-sm" onClick={() => setStatus(u, 'blocked')}>Block</button>
                   : <button className="btn btn-outline btn-sm" onClick={() => setStatus(u, 'active')}>Unblock</button>}
+                <button className="btn btn-danger btn-sm" onClick={() => remove(u)}>Delete</button>
               </div></td>
             </tr>))}
             {rows.length === 0 && <tr><td colSpan={6} className="faint">No users found</td></tr>}

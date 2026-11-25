@@ -10,18 +10,23 @@ export default function AdminHosts() {
   const [rows, setRows] = useState(null);
   const [adding, setAdding] = useState(false);
   const [review, setReview] = useState(null); // { host, id, selfie } object URLs while reviewing verification
+  const [gender, setGender] = useState('');
+  const [levels, setLevels] = useState([]);
+  useEffect(() => { api('/admin/levels').then(setLevels).catch(() => {}); }, []);
   const openReview = async (h) => {
     const get = async (kind) => {
       const r = await fetch(`/api/admin/hosts/${h.id}/verification/${kind}`, { credentials: 'same-origin' });
       return r.ok ? URL.createObjectURL(await r.blob()) : null;
     };
+    setGender(h.gender || '');
     setReview({ host: h, id: await get('id'), selfie: await get('selfie') });
   };
   const closeReview = () => { if (review) { [review.id, review.selfie].forEach((u) => u && URL.revokeObjectURL(u)); } setReview(null); };
   const decide = async (verification) => {
     const note = verification === 'rejected' ? prompt('Reason shown to the host', 'Photo is blurry — please upload a clearer one') : null;
     if (verification === 'rejected' && note === null) return;
-    await patch(review.host, { verification, note }, verification === 'verified' ? `${review.host.name} verified` : 'Verification rejected');
+    if (verification === 'verified' && !gender) { toast("Confirm the host's gender from the ID first", 'error'); return; }
+    await patch(review.host, { verification, note, gender: verification === 'verified' ? gender : undefined }, verification === 'verified' ? `${review.host.name} verified` : 'Verification rejected');
     closeReview();
   };
   const bonus = async (h) => {
@@ -30,6 +35,19 @@ export default function AdminHosts() {
     const note = prompt('Note shown to the host', 'Daily bonus') || 'Bonus';
     try { await api(`/admin/hosts/${h.id}/bonus`, { method: 'POST', body: { amount: Number(v), note } }); toast(`+${v} bonus sent to ${h.name}`, 'success'); load(); }
     catch (e) { toast(e.message, 'error'); }
+  };
+  const remove = async (u) => {
+    const typed = prompt(`Permanently delete ${u.name}${u.email ? ` (${u.email})` : ''}?\n\nTheir account, chats, photos and reviews are removed and cannot be restored. Call and payment records stay, anonymised.\n\nType DELETE to confirm.`);
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'DELETE') { toast('Not deleted — type DELETE to confirm', 'error'); return; }
+    try { await api(`/admin/users/${u.id}`, { method: 'DELETE' }); toast(`${u.name} deleted`, 'success'); load(); } catch (e) { toast(e.message, 'error'); }
+  };
+  const setPrice = async (h) => {
+    const v = prompt(`Member price for ${h.name}: video coins/min`, String(h.video_rate));
+    if (v === null) return;
+    const a = prompt('Audio coins/min', String(h.audio_rate));
+    if (a === null) return;
+    patch(h, { video_rate: Number(v), audio_rate: Number(a) }, 'Custom price saved');
   };
   const KYC = { none: ['—', 'chip-grey'], pending: ['Review', 'chip-amber'], verified: ['Verified', 'chip-green'], rejected: ['Rejected', 'chip-red'] };
   const [f, setF] = useState({ name: '', email: '', password: '', city: '', languages: 'Hindi,English', gender: 'female' });
@@ -51,22 +69,28 @@ export default function AdminHosts() {
       <div className="admin-top"><h1>Hosts</h1><div className="spacer" /><button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add host</button></div>
       {!rows ? <div className="spinner" /> : (
         <div className="card table-wrap" tabIndex={0} role="region" aria-label="Table"><table className="t">
-          <thead><tr><th>Host</th><th>Status</th><th>Verification</th><th>Level</th><th>Rate (video · audio)</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
+          <thead><tr><th>Host</th><th>Status</th><th>Verification</th><th>Level</th><th>Member price (video · audio)</th><th>Rating</th><th>Calls</th><th>Minutes</th><th>Balance</th><th /></tr></thead>
           <tbody>{rows.map((h) => (
             <tr key={h.id}>
               <td><div className="row"><Avatar src={h.avatar} name={h.name} size={34} online={!!h.online} busy={!!h.busy} /><div><b>{h.name}</b><div className="faint">{h.email}</div></div></div></td>
-              <td>{!h.approved ? <span className="chip chip-amber">pending</span> : h.status === 'blocked' ? <span className="chip chip-red">blocked</span>
+              <td>{!h.approved ? <span className="chip chip-amber">pending</span> : h.status === 'blocked' ? <span className="chip chip-red" title={h.block_reason || ''}>blocked</span>
                 : h.busy ? <span className="chip chip-amber">on call</span> : h.online ? <span className="chip chip-green">online</span> : <span className="chip chip-grey">offline</span>}</td>
               <td>{h.kyc_status === 'pending'
                 ? <button className="btn btn-sm btn-primary" onClick={() => openReview(h)}>Review ID</button>
-                : <span className={`chip ${(KYC[h.kyc_status] || KYC.none)[1]}`} title={h.kyc_note || ''}>{(KYC[h.kyc_status] || KYC.none)[0]}</span>}</td>
+                : <span className={`chip ${(KYC[h.kyc_status] || KYC.none)[1]}`} title={h.kyc_note || ''}>{(KYC[h.kyc_status] || KYC.none)[0]}{h.gender_verified ? ` · ${h.gender}` : ''}</span>}
+                {h.violations > 0 && <div><span className="chip chip-red" title="Tried to share contact details">⚠ {h.violations} contact</span></div>}</td>
               <td>
                 <select className="rate-input" style={{ width: 92 }} aria-label="Level" value={h.level_override ?? ''} onChange={(e) => patch(h, { level: e.target.value === '' ? null : Number(e.target.value) }, e.target.value === '' ? 'Level set automatically' : `Level set to ${e.target.value}`)}>
                   <option value="">Auto ★{h.level}</option>
-                  {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>★ {n}</option>)}
+                  {(levels.length ? levels : [{ level: 1 }, { level: 2 }, { level: 3 }]).map((t) => <option key={t.level} value={t.level}>★ {t.level}</option>)}
                 </select>
               </td>
-              <td style={{ whiteSpace: 'nowrap' }}>{h.video_rate} · {h.audio_rate}<span className="faint"> (tier {h.rate_level})</span></td>
+              <td style={{ whiteSpace: 'nowrap' }}>
+                {h.video_rate} · {h.audio_rate}
+                {h.rate_custom ? <> <span className="chip chip-amber">custom</span> <button className="link" style={{ fontSize: 12 }} onClick={() => patch(h, { custom_rate: false }, 'Back to level prices')}>reset</button></>
+                  : <> <button className="link" style={{ fontSize: 12 }} onClick={() => setPrice(h)}>edit</button></>}
+              </td>
+              <td>{h.reviews > 0 ? <>★ {h.rating} <span className="faint">({h.reviews})</span></> : <span className="faint">—</span>}</td>
               <td>{h.calls}</td>
               <td>{Math.round(h.seconds / 60)}</td>
               <td><Coins value={h.earnings} /></td>
@@ -74,19 +98,27 @@ export default function AdminHosts() {
                 {!h.approved ? <button className="btn btn-green btn-sm" onClick={() => patch(h, { approved: true }, `${h.name} approved`)}>Approve</button>
                   : <button className="btn btn-outline btn-sm" onClick={() => patch(h, { approved: false })}>Unapprove</button>}
                 <button className="btn btn-sm btn-outline" onClick={() => bonus(h)}>Bonus</button>
-                {h.status === 'active' ? <button className="btn btn-outline btn-sm" onClick={() => confirm(`Block ${h.name}?`) && patch(h, { status: 'blocked' })}>Block</button>
+                {h.status === 'active' ? <button className="btn btn-outline btn-sm" onClick={() => { const reason = prompt(`Block ${h.name}? Reason (shown to the host when they sign in)`, 'Fake identity or wrong profile information'); if (reason !== null) patch(h, { status: 'blocked', reason }, `${h.name} blocked`); }}>Block</button>
                   : <button className="btn btn-outline btn-sm" onClick={() => patch(h, { status: 'active' })}>Unblock</button>}
+                <button className="btn btn-danger btn-sm" onClick={() => remove(h)}>Delete</button>
               </div></td>
             </tr>))}
-            {rows.length === 0 && <tr><td colSpan={8} className="faint">No hosts yet</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={10} className="faint">No hosts yet</td></tr>}
           </tbody></table></div>
       )}
       {review && (
         <Sheet title={`Verify ${review.host.name}`} onClose={closeReview}>
-          <p className="faint" style={{ marginBottom: 10 }}>ID type: <b>{review.host.kyc_id_type || '—'}</b>. Check the name and face match, and the ID looks genuine.</p>
+          <p className="faint" style={{ marginBottom: 10 }}>ID type: <b>{review.host.kyc_id_type || '—'}</b>. Check the name and face match, the ID looks genuine, and the gender on the ID matches the profile.</p>
           <div className="kyc-grid" style={{ marginBottom: 14 }}>
             <figure style={{ margin: 0 }}>{review.id ? <img src={review.id} alt="ID document" style={{ width: '100%', borderRadius: 10 }} /> : <p className="faint">No ID photo</p>}<figcaption className="faint">ID</figcaption></figure>
             <figure style={{ margin: 0 }}>{review.selfie ? <img src={review.selfie} alt="Selfie" style={{ width: '100%', borderRadius: 10 }} /> : <p className="faint">No selfie</p>}<figcaption className="faint">Selfie</figcaption></figure>
+          </div>
+          <div className="field">
+            <label htmlFor="vg">Gender on the ID</label>
+            <select id="vg" className="input" value={gender} onChange={(e) => setGender(e.target.value)}>
+              <option value="">Choose…</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option>
+            </select>
+            {review.host.gender && gender && gender !== review.host.gender && <span className="faint" style={{ color: 'var(--amber)' }}>Profile says {review.host.gender} — the profile will be corrected to {gender}.</span>}
           </div>
           <div className="row" style={{ gap: 8 }}>
             <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => decide('rejected')}>Reject</button>

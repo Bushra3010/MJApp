@@ -50,16 +50,21 @@ export default function HostWallet() {
           ) : (
             <p className="muted" style={{ marginBottom: 12 }}>Add where you want to be paid first. <Link className="link" to="/host/bank">Add bank or UPI details →</Link></p>
           )}
-          <div className="field"><label htmlFor="amt">Coins (min 100)</label><input id="amt" type="number" min={100} className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(s.profile.earnings)} disabled={!dest} /></div>
+          <div className="field"><label htmlFor="amt">Coins (min {s.minWithdraw.toLocaleString('en-IN')}{s.minWithdrawInr > 0 ? ` = ₹${s.minWithdrawInr.toLocaleString('en-IN')}` : ''})</label><input id="amt" type="number" min={s.minWithdraw} className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={String(s.profile.earnings)} disabled={!dest} /></div>
           {amount > 0 && <p className="faint" style={{ marginTop: -6, marginBottom: 10 }}>You'll receive {inr(amount)}</p>}
-          <button className="btn btn-green btn-block" disabled={!dest || busy}>{busy ? 'Requesting…' : 'Withdraw'}</button>
+          {s.profile.earnings < s.minWithdraw
+            ? <p className="faint" style={{ marginBottom: 10 }}>Earn {inr(s.minWithdraw - s.profile.earnings)} more to withdraw. Minimum withdrawal is {inr(s.minWithdraw)}.</p>
+            : <button type="button" className="link" style={{ marginBottom: 10, fontSize: 13 }} onClick={() => setAmount(String(s.profile.earnings))}>Withdraw all ({inr(s.profile.earnings)})</button>}
+          <button className="btn btn-green btn-block" disabled={!dest || busy || s.profile.earnings < s.minWithdraw}>{busy ? 'Requesting…' : 'Withdraw'}</button>
+          <p className="faint" style={{ marginTop: 8, textAlign: 'center' }}>Paid within 12–{s.payoutSlaHours} hours of your request</p>
         </form>
 
         {s.payouts.length > 0 && <>
           <div className="section-title">Withdrawals</div>
           {s.payouts.map((p) => (
-            <div key={p.id} className="txn"><div><b>{inr(p.amount)}</b><div className="faint">{p.amount} coins · {p.upi} · {timeAgo(p.created_at)}</div></div>
-              <span className={`chip ${p.status === 'paid' ? 'chip-green' : p.status === 'rejected' ? 'chip-red' : 'chip-amber'}`}>{p.status}</span></div>
+            <div key={p.id} className="txn"><div style={{ minWidth: 0 }}><b>{inr(p.amount)}</b><div className="faint">{p.amount} coins · {p.upi} · {timeAgo(p.created_at)}</div>
+              {p.status === 'pending' && <div className="faint" style={{ color: p.overdue ? 'var(--amber)' : undefined }}>{p.overdue ? 'Taking longer than usual — our team has been alerted' : `Expected by ${new Date(p.due_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`}</div>}</div>
+              <span className={`chip ${p.status === 'paid' ? 'chip-green' : p.status === 'rejected' ? 'chip-red' : 'chip-amber'}`}>{{ pending: 'Processing', paid: 'Paid', rejected: 'Rejected' }[p.status] || p.status}</span></div>
           ))}
         </>}
         <div className="section-title">Transaction history</div>

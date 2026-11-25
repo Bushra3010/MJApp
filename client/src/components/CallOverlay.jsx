@@ -4,6 +4,7 @@ import { mmss } from '../lib/api.js';
 import Avatar from './Avatar.jsx';
 import Icon from './Icon.jsx';
 import Coins from './Coins.jsx';
+import CallSummary from './CallSummary.jsx';
 
 function Video({ stream, className, muted }) {
   const ref = useRef(null);
@@ -23,9 +24,10 @@ function useElapsed(startedAt) {
 }
 
 export default function CallOverlay() {
-  const { call, localStream, remoteStream, accept, decline, hangup, toggleMute, toggleCam, flipCam, me } = useCall();
+  const { call, localStream, remoteStream, accept, decline, hangup, toggleMute, toggleCam, flipCam, requestVideo, answerVideo, me } = useCall();
   const elapsed = useElapsed(call.phase === 'active' ? call.startedAt : null);
   if (call.phase === 'idle') return null;
+  if (call.phase === 'ended' && me?.role === 'user') return <CallSummary />;
   const freeLeft = call.phase === 'active' && call.freeUntil ? Math.max(0, (call.freeUntil - Date.now()) / 1000) : 0;
 
   const peer = call.peer || {};
@@ -45,7 +47,15 @@ export default function CallOverlay() {
       {!showRemoteVideo && <div className="bg" style={peer.avatar ? { backgroundImage: `url(${peer.avatar})` } : { background: 'radial-gradient(circle at 50% 30%, #ec1c7c, #14060e 70%)' }} />}
       {showRemoteVideo && <Video stream={remoteStream} className="remote" />}
       {!isVideo && remoteStream && <Audio stream={remoteStream} />}
-      {isVideo && localStream && call.phase !== 'ended' && !call.camOff && <Video stream={localStream} className="local" muted />}
+      {isVideo && localStream?.getVideoTracks().length > 0 && call.phase !== 'ended' && !call.camOff && <Video stream={localStream} className="local" muted />}
+      {isHost && call.upgradeRequest && call.phase === 'active' && (
+        <div className="upgrade-ask" role="alertdialog" aria-label="Video request">
+          <Icon name="video" size={22} />
+          <div><b>{peer.name} wants to switch to video</b><span>The call stays connected · {call.upgradeRequest.rate} coins/min for them</span></div>
+          <button className="btn btn-sm btn-outline" style={{ width: 'auto' }} onClick={() => answerVideo(false)}>Not now</button>
+          <button className="btn btn-sm btn-green" onClick={() => answerVideo(true)}><Icon name="video" size={16} />Turn on video</button>
+        </div>
+      )}
 
       <div className="top">
         <span className="pill">{isVideo ? <Icon name="video" size={16} /> : <Icon name="phone" size={16} />} {isVideo ? 'Video' : 'Audio'} · {call.rate} coins/min</span>
@@ -73,11 +83,12 @@ export default function CallOverlay() {
         {call.phase === 'active' && freeLeft > 0 && (
           <span className="pill free">{isHost ? "Free trial — earnings start after it ends" : `Free trial · billing starts in ${Math.ceil(freeLeft)}s`}</span>
         )}
+        {call.phase === 'active' && call.upgrade === 'waiting' && <span className="pill">Asking {peer.name} to switch to video…</span>}
         {call.phase === 'active' && call.lowBalance && !isHost && freeLeft <= 0 && (
           <span className="pill warn">Low balance — call ends at the next minute. Recharge in Wallet.</span>
         )}
         {call.phase === 'ended' && call.summary?.status === 'ended' && (
-          <span className="pill">{mmss(call.summary.seconds)} · {isHost ? 'call complete' : <>spent <Coins value={call.summary.charged} /></>}</span>
+          <span className="pill">{mmss(call.summary.seconds)} · {isHost ? <>earned <Coins value={call.summary.earned || 0} /></> : <>spent <Coins value={call.summary.charged} /></>}</span>
         )}
       </div>
 
@@ -90,6 +101,7 @@ export default function CallOverlay() {
       {(call.phase === 'outgoing' || call.phase === 'connecting' || call.phase === 'active') && (
         <div className="controls">
           <div><button className={`cbtn ${call.muted ? 'off' : ''}`} onClick={toggleMute} aria-label="Mute"><Icon name={call.muted ? 'micOff' : 'mic'} /></button><div className="cbtn-label">{call.muted ? 'Unmute' : 'Mute'}</div></div>
+          {!isVideo && !isHost && call.phase === 'active' && <div><button className={`cbtn upgrade ${call.upgrade ? 'off' : ''}`} onClick={requestVideo} disabled={!!call.upgrade} aria-label="Switch to video call"><Icon name="video" /></button><div className="cbtn-label">Video</div></div>}
           {isVideo && <div><button className={`cbtn ${call.camOff ? 'off' : ''}`} onClick={toggleCam} aria-label="Camera"><Icon name={call.camOff ? 'camOff' : 'video'} /></button><div className="cbtn-label">Camera</div></div>}
           {isVideo && <div><button className="cbtn" onClick={flipCam} aria-label="Flip camera"><Icon name="flip" /></button><div className="cbtn-label">Flip</div></div>}
           <div><button className="cbtn end" onClick={hangup} aria-label="End call"><Icon name="end" size={28} fill /></button><div className="cbtn-label">End</div></div>

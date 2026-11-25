@@ -5,7 +5,7 @@ import { makeDb, migrate, publicUser, safeHost } from './db.js';
 import { verifyJwt } from './crypto.js';
 import { vapidKeys, sendPush } from './push.js';
 import { buildApi } from './routes.js';
-import { ensureLevel, onlineStart, onlineStop, addAlert, creditReferrer } from './host-program.js';
+import { ensureLevel, onlineStart, onlineStop, addAlert, creditReferrer, earnPerMinute } from './host-program.js';
 
 const RING_MS = 30_000;
 const OFFLINE_GRACE_MS = 8_000;
@@ -21,6 +21,11 @@ export class Hub extends DurableObject {
     this.env = env;
     this.db = makeDb(ctx.storage);
     migrate(this.db);
+    // once, after the move to lifetime levels: put every host on the level and prices their earnings give them
+    if (!this.db.prepare("SELECT 1 FROM meta WHERE key = 'levels_v2_applied'").get()) {
+      for (const r of this.db.prepare('SELECT user_id FROM host_profiles').all()) ensureLevel(this, r.user_id);
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('levels_v2_applied', '1')").run();
+    }
     this.minuteMs = Number(env.BILLING_PERIOD_MS || 60_000);
     this.rl = new Map();
     this.api = buildApi(this);
@@ -55,7 +60,23 @@ export class Hub extends DurableObject {
     return earned;
   }
 
-  me(u) {
+  /** Pay the host a fixed rupee amount (their per-minute call earning), stored as coins; fractions carry over. */
+  creditHostInr(hostId, inr, note, ref) {
+    const hp = this.db.prepare('SELECT earn_remainder FROM host_profiles WHERE user_id = ?').get(hostId);
+    const perCoin = this.setting('coin_to_inr') || 0.5;
+    if (!hp || inr <= 0) return 0;
+    const total = Math.round((inr / perCoin) * 100) + (hp.earn_remainder || 0); // in 1/100 coin
+    const earned = Math.floor(total / 100);
+    this.db.prepare('UPDATE host_profiles SET earn_remainder = ? WHERE user_id = ?').run(total % 100, hostId);
+    if (earned <= 0) return 0;
+    this.db.prepare('UPDATE host_profiles SET earnings = earnings + ?, total_earned = total_earned + ? WHERE user_id = ?').run(earned, earned, hostId);
+    const bal = this.db.prepare('SELECT earnings FROM host_profiles WHERE user_id = ?').get(hostId)?.earnings ?? 0;
+    this.db.prepare('INSERT INTO transactions (user_id, kind, amount, balance_after, note, ref) VALUES (?,?,?,?,?,?)').run(hostId, 'earning', earned, bal, note, String(ref));
+    creditReferrer(this, hostId, earned);
+    return earned;
+  }
+
+  me(u, device) {
     const out = publicUser(u);
     out.has_password = String(u.password_hash || '').startsWith('pbkdf2$');
     out.google_linked = !!u.supabase_id;
@@ -63,8 +84,9 @@ export class Hub extends DurableObject {
     delete out.supabase_id;
     if (u.role === 'host') ensureLevel(this, u.id);
     if (u.role === 'host') out.host = safeHost(this.db.prepare('SELECT * FROM host_profiles WHERE user_id = ?').get(u.id));
-    if (u.role === 'user') out.free_trial = { available: this.freeTrialAvailable(u), seconds: this.setting('free_trial_seconds') };
+    if (u.role === 'user') out.free_trial = { available: this.freeTrialAvailable(u, device), seconds: this.setting('free_trial_seconds') };
     delete out.free_trial_used_at;
+    delete out.block_reason;
     return out;
   }
 
@@ -74,8 +96,11 @@ export class Hub extends DurableObject {
   }
 
   /** A member's first call starts with free seconds (once per member, if switched on in admin). */
-  freeTrialAvailable(u) {
-    return u.role === 'user' && !u.free_trial_used_at && this.setting('free_trial_enabled') === 1 && this.setting('free_trial_seconds') > 0;
+  freeTrialAvailable(u, device) {
+    if (u.role !== 'user' || u.free_trial_used_at || this.setting('free_trial_enabled') !== 1 || this.setting('free_trial_seconds') <= 0) return false;
+    // one free call per device: a second account on the same phone/browser doesn't get another one
+    const d = cleanDevice(device);
+    return !(d && this.db.prepare('SELECT 1 FROM trial_devices WHERE device = ? AND user_id != ?').get(d, u.id));
   }
 
   /** The signed-in user for a request, only if their session was issued by this same app and matches their role. */
@@ -132,6 +157,20 @@ export class Hub extends DurableObject {
     })());
   }
 
+  /** Send an event to every host who has the app open. */
+  toHosts(e, d) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== 1) continue;
+      const who = ws.deserializeAttachment();
+      if (who?.role === 'host') this.send(ws, { t: 'ev', e, d });
+    }
+  }
+  /** What hosts may see about a member. */
+  customerCard(u) {
+    const isNew = Date.now() - Date.parse(String(u.created_at).replace(' ', 'T') + 'Z') < 7 * 86_400_000;
+    return { id: u.id, name: u.name, avatar: u.avatar, city: u.city, languages: u.languages, created_at: u.created_at, online: this.isOnline(u.id) ? 1 : 0, isNew };
+  }
+
   setHostFlags(hostId, fields) {
     for (const [k, v] of Object.entries(fields)) this.db.prepare(`UPDATE host_profiles SET ${k} = ? WHERE user_id = ?`).run(v, hostId);
     const hp = this.db.prepare('SELECT online, busy FROM host_profiles WHERE user_id = ?').get(hostId);
@@ -160,9 +199,12 @@ export class Hub extends DurableObject {
     if (!u) return new Response('unauthorized', { status: 401 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
+    // a member counts as "just came online" only if they had no open app and weren't in the reconnect grace period
+    const cameOnline = u.role === 'user' && !this.isOnline(u.id) && !this.db.prepare('SELECT 1 FROM timers WHERE key = ?').get(`offline:${u.id}`);
     this.ctx.acceptWebSocket(server, [`u:${u.id}`]);
     server.serializeAttachment({ id: u.id, role: u.role });
     this.db.prepare('DELETE FROM timers WHERE key = ?').run(`offline:${u.id}`);
+    if (cameOnline) this.toHosts('customer:online', this.customerCard(u));
     this.db.prepare("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?").run(u.id);
     if (u.role === 'host') {
       const hp = this.db.prepare('SELECT online, busy FROM host_profiles WHERE user_id = ?').get(u.id);
@@ -203,13 +245,18 @@ export class Hub extends DurableObject {
     switch (e) {
       case 'presence:set': {
         if (u.role !== 'host') return { error: 'Only hosts' };
-        const hp = db.prepare('SELECT approved FROM host_profiles WHERE user_id = ?').get(u.id);
+        const hp = db.prepare('SELECT approved, kyc_status FROM host_profiles WHERE user_id = ?').get(u.id);
         if (d.online && !hp?.approved) return { error: 'Your profile is waiting for admin approval' };
+        if (d.online && this.setting('require_host_verification') === 1 && hp.kyc_status !== 'verified') {
+          return { error: hp.kyc_status === 'pending' ? 'Your identity verification is under review. You can go online once it is approved.' : 'Complete identity verification (Account → Verification) before going online.', code: 'NEEDS_VERIFICATION' };
+        }
         this.setHostFlags(u.id, { online: d.online ? 1 : 0 });
         if (d.online) { ensureLevel(this, u.id); onlineStart(this, u.id); } else onlineStop(this, u.id);
         return { ok: true, online: d.online ? 1 : 0 };
       }
-      case 'call:start': return this.startCall(u, Number(d.hostId), d.type);
+      case 'call:start': return this.startCall(u, Number(d.hostId), d.type, d.device);
+      case 'call:upgrade': return this.requestUpgrade(u, Number(d.callId));
+      case 'call:upgrade-answer': return this.answerUpgrade(u, Number(d.callId), !!d.accept);
       case 'call:accept': return this.acceptCall(u, Number(d.callId));
       case 'call:decline': {
         const c = this.liveCallOf(u, d.callId);
@@ -247,7 +294,7 @@ export class Hub extends DurableObject {
     return c && (c.user_id === u.id || c.host_id === u.id) ? c : null;
   }
 
-  startCall(u, hostId, type) {
+  startCall(u, hostId, type, device) {
     const db = this.db;
     if (u.role !== 'user') return { error: 'Only users can start calls' };
     if (!['audio', 'video'].includes(type)) return { error: 'Bad call type' };
@@ -261,12 +308,12 @@ export class Hub extends DurableObject {
     if (!h.online || !this.isOnline(hostId)) return { error: `${h.name} is offline right now` };
     if (h.busy || db.prepare('SELECT 1 FROM live_calls WHERE host_id = ?').get(hostId)) return { error: `${h.name} is on another call. Try again in a bit.` };
     const rate = type === 'video' ? h.video_rate : h.audio_rate;
-    const trialMs = this.freeTrialAvailable(u) ? this.setting('free_trial_seconds') * 1000 : 0;
+    const trialMs = this.freeTrialAvailable(u, device) ? this.setting('free_trial_seconds') * 1000 : 0;
     if (u.coins < rate && !trialMs) return { error: `You need at least ${rate} coins for a ${type} call`, code: 'LOW_BALANCE' };
 
     const callId = Number(db.prepare('INSERT INTO calls (user_id, host_id, type, rate) VALUES (?,?,?,?)').run(u.id, hostId, type, rate).lastInsertRowid);
-    db.prepare(`INSERT INTO live_calls (id, user_id, host_id, type, rate, status, ring_deadline_ms, user_name, host_name, free_trial_ms)
-      VALUES (?,?,?,?,?, 'ringing', ?, ?, ?, ?)`).run(callId, u.id, hostId, type, rate, Date.now() + RING_MS, u.name, h.name, trialMs);
+    db.prepare(`INSERT INTO live_calls (id, user_id, host_id, type, rate, status, ring_deadline_ms, user_name, host_name, free_trial_ms, trial_device)
+      VALUES (?,?,?,?,?, 'ringing', ?, ?, ?, ?, ?)`).run(callId, u.id, hostId, type, rate, Date.now() + RING_MS, u.name, h.name, trialMs, trialMs ? cleanDevice(device) : null);
     this.setHostFlags(hostId, { busy: 1 });
     this.emitTo(hostId, 'call:incoming', { callId, type, rate, freeTrialMs: trialMs, from: { id: u.id, name: u.name, avatar: u.avatar } });
     this.pushTo(hostId, { title: `Incoming ${type} call`, body: `${u.name} is calling you`, url: '/host', tag: `call-${callId}`, call: true }, { urgency: 'high', ttl: 30 });
@@ -281,7 +328,9 @@ export class Hub extends DurableObject {
     let trialMs = c.free_trial_ms || 0;
     if (trialMs) {
       // claim the trial now (once per member); if it was used meanwhile, fall back to a paid call
-      const claimed = this.db.prepare("UPDATE users SET free_trial_used_at = datetime('now') WHERE id = ? AND free_trial_used_at IS NULL").run(c.user_id).changes;
+      const deviceTaken = c.trial_device && this.db.prepare('SELECT 1 FROM trial_devices WHERE device = ? AND user_id != ?').get(c.trial_device, c.user_id);
+      const claimed = !deviceTaken && this.db.prepare("UPDATE users SET free_trial_used_at = datetime('now') WHERE id = ? AND free_trial_used_at IS NULL").run(c.user_id).changes;
+      if (claimed && c.trial_device) this.db.prepare('INSERT OR IGNORE INTO trial_devices (device, user_id) VALUES (?, ?)').run(c.trial_device, c.user_id);
       if (!claimed) { trialMs = 0; this.db.prepare('UPDATE live_calls SET free_trial_ms = 0 WHERE id = ?').run(c.id); }
     }
     this.db.prepare("UPDATE live_calls SET status = 'active', started_ms = ?, ring_deadline_ms = NULL, next_charge_ms = ? WHERE id = ?")
@@ -306,15 +355,46 @@ export class Hub extends DurableObject {
       this.endCall(c.id, c.minutes === 0 && c.free_trial_ms ? 'trial_ended' : 'balance');
       return false;
     }
-    this.creditHost(c.host_id, c.rate, `${c.type === 'video' ? 'Video' : 'Audio'} call minute`, `call:${c.id}`);
+    // the host earns a fixed rupee amount per minute, set by their level (not a share of the price)
+    const got = this.creditHostInr(c.host_id, earnPerMinute(this, c.host_id, c.type), `${c.type === 'video' ? 'Video' : 'Audio'} call minute`, `call:${c.id}`);
     const minutes = c.minutes + 1;
     const charged = c.charged + c.rate;
-    this.db.prepare('UPDATE live_calls SET minutes = ?, charged = ? WHERE id = ?').run(minutes, charged, c.id);
+    const earned = (c.earned || 0) + got;
+    this.db.prepare('UPDATE live_calls SET minutes = ?, charged = ?, earned = ? WHERE id = ?').run(minutes, charged, earned, c.id);
     this.emitTo(c.user_id, 'wallet:balance', { coins });
     const t = { callId: c.id, charged, minutes, lowBalance: coins < c.rate, nextChargeInMs: this.minuteMs };
     this.emitTo(c.user_id, 'call:tick', { ...t, coins });
-    this.emitTo(c.host_id, 'call:tick', { ...t, earned: Math.floor((charged * this.setting('host_share_pct')) / 100) });
+    this.emitTo(c.host_id, 'call:tick', { ...t, earned });
     return true;
+  }
+
+  /** Member asks to turn an audio call into a video call. The host decides; the call keeps running meanwhile. */
+  requestUpgrade(u, callId) {
+    const c = this.liveCallOf(u, callId);
+    if (!c || c.user_id !== u.id || c.status !== 'active') return { error: 'Call not active' };
+    if (c.type === 'video') return { error: 'This is already a video call' };
+    const hp = this.db.prepare('SELECT video_rate, accept_video FROM host_profiles WHERE user_id = ?').get(c.host_id);
+    if (!hp?.accept_video) return { error: `${c.host_name} isn't taking video calls right now` };
+    const me = this.db.prepare('SELECT coins FROM users WHERE id = ?').get(u.id);
+    if (me.coins < hp.video_rate) return { error: `You need at least ${hp.video_rate} coins for video`, code: 'LOW_BALANCE', rate: hp.video_rate };
+    this.db.prepare('UPDATE live_calls SET upgrade_pending = 1 WHERE id = ?').run(c.id);
+    this.emitTo(c.host_id, 'call:upgrade-request', { callId: c.id, rate: hp.video_rate, from: c.user_name });
+    return { ok: true, rate: hp.video_rate };
+  }
+
+  /** Host accepts or declines the switch to video. On accept the same call continues as video, billed at the video rate from the next minute. */
+  answerUpgrade(u, callId, accept) {
+    const c = this.liveCallOf(u, callId);
+    if (!c || c.host_id !== u.id || c.status !== 'active' || !c.upgrade_pending) return { error: 'No video request' };
+    this.db.prepare('UPDATE live_calls SET upgrade_pending = 0 WHERE id = ?').run(c.id);
+    if (!accept) { this.emitTo(c.user_id, 'call:upgrade-declined', { callId: c.id }); return { ok: true }; }
+    const rate = this.db.prepare('SELECT video_rate FROM host_profiles WHERE user_id = ?').get(c.host_id).video_rate;
+    this.db.prepare("UPDATE live_calls SET type = 'video', rate = ? WHERE id = ?").run(rate, c.id);
+    this.db.prepare("UPDATE calls SET type = 'video', rate = ? WHERE id = ?").run(rate, c.id);
+    const payload = { callId: c.id, type: 'video', rate };
+    this.emitTo(c.user_id, 'call:upgraded', payload);
+    this.emitTo(c.host_id, 'call:upgraded', payload);
+    return { ok: true, rate };
   }
 
   endCall(callId, reason) {
@@ -345,8 +425,8 @@ export class Hub extends DurableObject {
       addAlert(this, c.host_id, 'missed', 'Missed call', `You missed a ${c.type} call from ${c.user_name}`, '/host/calls');
     }
     const summary = { callId: c.id, status, reason, seconds, charged: c.charged };
-    this.emitTo(c.user_id, 'call:ended', summary);
-    this.emitTo(c.host_id, 'call:ended', summary);
+    this.emitTo(c.user_id, 'call:ended', { ...summary, reviewable: status === 'ended' && seconds > 0 });
+    this.emitTo(c.host_id, 'call:ended', { ...summary, earned: c.earned || 0 });
     this.scheduleAlarm();
   }
 
@@ -376,9 +456,16 @@ export class Hub extends DurableObject {
         for (const c of this.db.prepare('SELECT id FROM live_calls WHERE user_id = ? OR host_id = ?').all(t.ref, t.ref)) this.endCall(c.id, 'disconnected');
         const u = this.db.prepare('SELECT role FROM users WHERE id = ?').get(t.ref);
         if (u?.role === 'host') { this.setHostFlags(t.ref, { online: 0 }); onlineStop(this, t.ref); }
+        if (u?.role === 'user') this.toHosts('customer:offline', { id: t.ref });
         this.db.prepare("UPDATE users SET last_seen_at = datetime('now') WHERE id = ?").run(t.ref);
       }
     }
     this.scheduleAlarm();
   }
+}
+
+/** Device ids come from the app (a random id kept on the device). Only short, plain ids are accepted. */
+export function cleanDevice(d) {
+  const s = String(d || '').trim();
+  return /^[A-Za-z0-9_-]{8,64}$/.test(s) ? s : null;
 }
