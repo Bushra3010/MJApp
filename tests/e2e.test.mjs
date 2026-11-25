@@ -364,6 +364,11 @@ try {
   assert.match((await req('/host/verification', { method: 'POST', form: vfd }, HT)).body.error, /selfie/); ok('verification needs both ID photo and selfie');
   vfd = new FormData(); vfd.append('idType', 'aadhaar'); vfd.append('id', new Blob([vpng], { type: 'image/png' }), 'id.png'); vfd.append('selfie', new Blob([vpng], { type: 'image/png' }), 's.png');
   assert.equal((await req('/host/verification', { method: 'POST', form: vfd }, HT)).body.status, 'pending'); ok('host submits ID + selfie for verification');
+  const vq = (await req('/admin/verifications?status=pending', {}, A)).body;
+  const vqRow = vq.hosts.find((x) => x.id === HT.user.id);
+  assert.ok(vqRow); assert.equal(vqRow.docs, 2); assert.ok(vqRow.submitted_at); assert.ok(vq.counts.pending >= 1);
+  assert.ok((await req('/admin/stats', {}, A)).body.pendingVerifications >= 1);
+  assert.ok([401, 403].includes((await req('/admin/verifications', {}, HT)).status)); ok('admin sees the request in the verification queue (with both photos) and on the dashboard');
   const doc = await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${A.token}`, 'x-mj-app': 'admin' } });
   assert.equal(doc.status, 200); assert.equal(doc.headers.get('content-type'), 'image/png'); assert.match(doc.headers.get('cache-control'), /no-store/);
   assert.ok([401, 403].includes((await fetch(`${base}/api/admin/hosts/${HT.user.id}/verification/id`, { headers: { authorization: `Bearer ${HT.token}`, 'x-mj-app': 'host' } })).status));

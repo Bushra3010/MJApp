@@ -165,6 +165,13 @@ export class Hub extends DurableObject {
       if (who?.role === 'host') this.send(ws, { t: 'ev', e, d });
     }
   }
+  /** Send an event to every admin who has the admin panel open. */
+  toAdmins(e, d) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== 1) continue;
+      if (ws.deserializeAttachment()?.role === 'admin') this.send(ws, { t: 'ev', e, d });
+    }
+  }
   /** What hosts may see about a member. */
   customerCard(u) {
     const isNew = Date.now() - Date.parse(String(u.created_at).replace(' ', 'T') + 'Z') < 7 * 86_400_000;

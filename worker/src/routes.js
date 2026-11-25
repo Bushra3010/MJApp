@@ -763,6 +763,7 @@ export function buildApi(h) {
       }
       db.prepare("UPDATE host_profiles SET kyc_status = 'pending', kyc_id_type = ?, kyc_note = NULL WHERE user_id = ?").run(idType, u.id);
     })();
+    h.toAdmins('admin:verification', { id: u.id, name: u.name });
     return { status: 'pending', idType };
   }));
 
@@ -793,6 +794,7 @@ export function buildApi(h) {
     users: one("SELECT COUNT(*) n FROM users WHERE role='user'").n,
     hosts: one("SELECT COUNT(*) n FROM users WHERE role='host'").n,
     pendingHosts: one('SELECT COUNT(*) n FROM host_profiles WHERE approved = 0').n,
+    pendingVerifications: one("SELECT COUNT(*) n FROM host_profiles hp JOIN users u ON u.id = hp.user_id WHERE hp.kyc_status = 'pending'").n,
     onlineHosts: db.prepare('SELECT user_id FROM host_profiles WHERE online = 1').all().filter((x) => h.isOnline(x.user_id)).length,
     liveCalls: h.liveCalls().length,
     callsToday: one("SELECT COUNT(*) n FROM calls WHERE date(created_at) = date('now')").n,
@@ -855,6 +857,21 @@ export function buildApi(h) {
       (SELECT COALESCE(SUM(seconds),0) FROM calls c WHERE c.host_id = u.id) seconds
     FROM users u JOIN host_profiles h ON h.user_id = u.id ORDER BY h.approved ASC, (h.kyc_status = 'pending') DESC, u.id DESC`).all().map(withPresence)));
 
+  // Verification queue: hosts who sent an ID + selfie (pending first), and past decisions
+  A.get('/verifications', R((c) => {
+    const status = c.req.query('status') || 'pending';
+    const where = status === 'all' ? "hp.kyc_status != 'none'" : 'hp.kyc_status = ?';
+    const args = status === 'all' ? [] : [status];
+    const rows = db.prepare(`SELECT u.id, u.name, u.email, u.phone, u.avatar, u.gender, u.city, u.status, u.created_at, u.birth_date,
+        hp.approved, hp.kyc_status, hp.kyc_id_type, hp.kyc_note, hp.gender_verified,
+        (SELECT MAX(created_at) FROM kyc_docs d WHERE d.host_id = u.id) AS submitted_at,
+        (SELECT COUNT(*) FROM kyc_docs d WHERE d.host_id = u.id) AS docs
+      FROM users u JOIN host_profiles hp ON hp.user_id = u.id WHERE ${where}
+      ORDER BY submitted_at ${status === 'pending' ? 'ASC' : 'DESC'}, u.id DESC LIMIT 300`).all(...args);
+    const counts = Object.fromEntries(db.prepare("SELECT kyc_status s, COUNT(*) n FROM host_profiles GROUP BY kyc_status").all().map((r) => [r.s, r.n]));
+    return { counts: { pending: counts.pending || 0, verified: counts.verified || 0, rejected: counts.rejected || 0 }, hosts: rows };
+  }));
+
   A.get('/hosts/:id/verification/:kind', async (c) => {
     const row = db.prepare('SELECT type, data FROM kyc_docs WHERE host_id = ? AND kind = ?').get(Number(c.req.param('id')), c.req.param('kind'));
     if (!row) return c.json({ error: 'Not found' }, 404);
@@ -906,7 +923,11 @@ export function buildApi(h) {
       addAlert(h, id, 'verification', verification === 'verified' ? 'You are verified ✓' : 'Verification not approved',
         verification === 'verified' ? 'Members now see a verified badge on your profile.' : String(note || 'Please upload clearer photos'), '/host/verification');
     }
-    if (approved !== undefined) db.prepare('UPDATE host_profiles SET approved = ? WHERE user_id = ?').run(approved ? 1 : 0, id);
+    if (approved !== undefined) {
+      const was = db.prepare('SELECT approved FROM host_profiles WHERE user_id = ?').get(id).approved;
+      db.prepare('UPDATE host_profiles SET approved = ? WHERE user_id = ?').run(approved ? 1 : 0, id);
+      if (approved && !was) addAlert(h, id, 'approval', 'Your profile is approved 🎉', 'You can go online and start taking calls.', '/host');
+    }
     // hand-set prices stay until the admin switches the host back to level prices (custom_rate: false)
     if (audio_rate !== undefined) db.prepare('UPDATE host_profiles SET audio_rate = ?, rate_custom = 1 WHERE user_id = ?').run(Math.min(100000, Math.max(0, Number(audio_rate) | 0)), id);
     if (video_rate !== undefined) db.prepare('UPDATE host_profiles SET video_rate = ?, rate_custom = 1 WHERE user_id = ?').run(Math.min(100000, Math.max(0, Number(video_rate) | 0)), id);

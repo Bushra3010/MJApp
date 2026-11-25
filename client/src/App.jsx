@@ -44,6 +44,7 @@ import AdminPayouts from './pages/admin/AdminPayouts.jsx';
 import AdminSettings from './pages/admin/AdminSettings.jsx';
 import AdminContent from './pages/admin/AdminContent.jsx';
 import AdminSafety from './pages/admin/AdminSafety.jsx';
+import AdminVerifications from './pages/admin/AdminVerifications.jsx';
 
 
 function Guard({ role, children }) {
@@ -116,6 +117,7 @@ export default function App() {
             <Route path="payouts" element={<AdminPayouts />} />
             <Route path="content" element={<AdminContent />} />
             <Route path="safety" element={<AdminSafety />} />
+            <Route path="verification" element={<AdminVerifications />} />
             <Route path="settings" element={<AdminSettings />} />
           </Route>
         )}

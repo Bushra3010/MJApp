@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, mmss, timeAgo } from '../../lib/api.js';
 import { useAuth } from '../../lib/auth.jsx';
 
@@ -17,11 +18,17 @@ export default function AdminDashboard() {
     ['Revenue today (₹)', s.revenueToday], ['Revenue all time (₹)', s.revenueTotal],
     ['Users', s.users], ['Hosts', s.hosts], ['Hosts online', s.onlineHosts], ['Live calls', s.liveCalls],
     ['Calls today', s.callsToday], ['Minutes today', s.minutesToday], ['Messages today', s.messagesToday], ['Coins spent today', s.coinsSpentToday],
-    ['Coins sold (all time)', s.coinsSoldTotal], ['Hosts awaiting approval', s.pendingHosts], ['Open reports', s.openReports], ['Pending payouts', s.pendingPayouts],
+    ['Coins sold (all time)', s.coinsSoldTotal], ['Hosts awaiting approval', s.pendingHosts], ['Verifications to review', s.pendingVerifications], ['Open reports', s.openReports], ['Pending payouts', s.pendingPayouts],
   ];
   return (
     <>
       <h1>Dashboard</h1>
+      {s.pendingVerifications > 0 && (
+        <Link to="/admin/verification" className="card verify-banner" style={{ marginBottom: 14 }}>
+          <b style={{ fontSize: 22 }}>{s.pendingVerifications}</b>
+          <div><b>{s.pendingVerifications === 1 ? 'host is' : 'hosts are'} waiting for identity verification</b><span>Review their ID and selfie →</span></div>
+        </Link>
+      )}
       <div className="kpis">{k.map(([l, v]) => <div key={l} className="card kpi"><span>{l}</span><b>{Number(v).toLocaleString('en-IN')}</b></div>)}</div>
       {s.live.length > 0 && <>
         <h2 className="section-title">Live now</h2>
