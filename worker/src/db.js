@@ -253,6 +253,8 @@ const SCHEMA = [
   CREATE INDEX IF NOT EXISTS idx_media_host ON host_media(host_id, id);
   -- large files are kept in pieces (a single SQLite value is limited to 2 MB)
   CREATE TABLE IF NOT EXISTS upload_parts (name TEXT NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (name, idx));`,
+  // v9 — sharing contact details bans the account on the first attempt (admins can change this in Settings)
+  `UPDATE settings SET value = '1' WHERE key = 'contact_block_after' AND value = '3';`,
 ];
 
 export const DEFAULT_SETTINGS = {
@@ -265,7 +267,7 @@ export const DEFAULT_SETTINGS = {
   min_withdraw_inr: '2000',  // hosts can withdraw once their balance is worth this many rupees
   payout_sla_hours: '18',    // withdrawals are paid within this many hours
   chat_limit: '3',           // text messages each side may send in one chat (0 = no limit); calls stay open
-  contact_block_after: '3',  // a host is blocked automatically after this many contact-sharing attempts (0 = never)
+  contact_block_after: '1',  // a host or member is banned automatically after this many contact-sharing attempts (0 = never)
   require_host_verification: '1', // hosts must pass ID + gender verification before going online
 };
 

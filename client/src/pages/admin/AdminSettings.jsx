@@ -11,7 +11,7 @@ const FIELDS = [
   ['min_withdraw_inr', 'Minimum withdrawal (₹)', 'Hosts can withdraw once their balance is worth this much.'],
   ['payout_sla_hours', 'Pay withdrawals within (hours)', 'Shown to hosts; requests older than this are marked overdue for admins.'],
   ['chat_limit', 'Chat messages per side', 'Each member and host can send this many messages in one chat, then only calls. 0 = no limit.'],
-  ['contact_block_after', 'Block host after … contact-sharing attempts', 'Messages with phone numbers, WhatsApp or other contact details are never sent. 0 = only warn.'],
+  ['contact_block_after', 'Ban host or member after … contact-sharing attempts', 'Messages with phone numbers, WhatsApp or other contact details are never sent. 1 = ban on the first attempt, 0 = only warn.'],
   ['free_trial_seconds', 'Free trial length (seconds)', "A new member's first call is free for this long. Billing starts after it; the host earns nothing during it."],
 ];
 export default function AdminSettings() {

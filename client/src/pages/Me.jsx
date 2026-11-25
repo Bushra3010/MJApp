@@ -23,10 +23,21 @@ export default function Me() {
     try { setUser(await api('/me', { method: 'PATCH', body: f })); toast('Profile saved', 'success'); setEditing(false); }
     catch (err) { toast(err.message, 'error'); } finally { setSaving(false); }
   };
+  const [galleryKey, setGalleryKey] = useState(0);
   const onPhoto = async (e) => {
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
     setUploading(true);
+    // hosts can pick a video here too; it goes into their photos & videos
+    if (user.role === 'host' && file.type.startsWith('video/')) {
+      try {
+        if (file.size > 30 * 1024 * 1024) throw new Error('Video must be under 30 MB (about 1 minute)');
+        const fd = new FormData(); fd.append('file', file, file.name || 'video.mp4');
+        await api('/host/media', { method: 'POST', form: fd });
+        setGalleryKey((k) => k + 1); toast('Video added to your profile', 'success');
+      } catch (err) { toast(err.message, 'error'); } finally { setUploading(false); }
+      return;
+    }
     try {
       const blob = await preparePhoto(file);
       const fd = new FormData(); fd.append('photo', blob, blob.type === 'image/webp' ? 'photo.webp' : 'photo.jpg');
@@ -49,7 +60,7 @@ export default function Me() {
       <div className="p-photo">
         {user.avatar ? <img src={user.avatar} alt="" /> : <div className="ini" style={{ background: warmFor(user.name) }}>{initials(user.name)}</div>}
         <button type="button" className="cam press" onClick={() => fileRef.current?.click()} aria-label="Change photo">{uploading ? '…' : <Icon name="camera" size={20} />}</button>
-        <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPhoto} />
+        <input ref={fileRef} type="file" accept={user.role === 'host' ? 'image/*,video/mp4,video/quicktime,video/webm' : 'image/*'} hidden onChange={onPhoto} />
       </div>
       <div className="p-body">
         {user.role === 'user' && <>
@@ -83,12 +94,12 @@ export default function Me() {
           <p className="p-text">{user.bio || <span className="muted">Tell people a little about yourself — tap the pencil to add a bio.</span>}</p>
           {langs.length > 0 && <><div className="p-label">Languages</div><div className="pills">{langs.map((l) => <span key={l} className="pill2">🗣️ {l}</span>)}</div></>}
         </>)}
-        {user.role === 'host' && <Gallery hostId={user.id} editable />}
+        {user.role === 'host' && <Gallery key={galleryKey} hostId={user.id} editable />}
         <div className="p-label">Account</div>
         <div className="p-menu">
           {user.role === 'host' ? (<>
             <button type="button" onClick={() => setEditing(true)} className="menu-row"><span className="ic violet"><Icon name="edit" size={20} /></span><span className="t">Edit profile<small>Name, city, about you</small></span><Icon name="chevron" size={18} className="chev" /></button>
-            <button type="button" onClick={() => fileRef.current?.click()} className="menu-row"><span className="ic amber"><Icon name="camera" size={20} /></span><span className="t">Upload photo<small>A clear photo gets more calls</small></span><Icon name="chevron" size={18} className="chev" /></button>
+            <button type="button" onClick={() => fileRef.current?.click()} className="menu-row"><span className="ic amber"><Icon name="camera" size={20} /></span><span className="t">Upload photo or video<small>A clear photo or short video gets more calls</small></span><Icon name="chevron" size={18} className="chev" /></button>
             <Link to="/host/wallet" className="menu-row"><span className="ic green"><Icon name="wallet" size={20} /></span><span className="t">Wallet<small>Balance, withdraw, transactions</small></span><Coins value={user.host?.earnings ?? 0} /><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/rate" className="menu-row"><span className="ic amber"><Icon name="coin" size={20} /></span><span className="t">My level & rate<small>Level ★ {user.host?.level ?? 1} · rates rise with your level</small></span><Icon name="chevron" size={18} className="chev" /></Link>
             <Link to="/host/reviews" className="menu-row"><span className="ic amber"><Icon name="star" size={20} /></span><span className="t">My ratings<small>Stars and reviews from members</small></span><Icon name="chevron" size={18} className="chev" /></Link>

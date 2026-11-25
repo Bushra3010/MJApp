@@ -60,7 +60,7 @@ export default function Gallery({ hostId, editable = false }) {
       {open && (
         <div className="gal-view" role="dialog" aria-label="Photo or video" onClick={() => setOpen(null)}>
           <div onClick={(e) => e.stopPropagation()} className="gal-view-in">
-            {open.kind === 'video' ? <video src={open.url} controls autoPlay playsInline /> : <img src={open.url} alt="" />}
+            {open.kind === 'video' ? <video src={open.url} controls autoPlay playsInline controlsList="nodownload noremoteplayback" disablePictureInPicture /> : <img src={open.url} alt="" />}
             <div className="row" style={{ gap: 8, marginTop: 10, justifyContent: 'center' }}>
               {editable && <button className="btn btn-outline btn-sm" onClick={() => remove(open)}><Icon name="trash" size={16} />Delete</button>}
               <button className="btn btn-primary btn-sm" onClick={() => setOpen(null)}>Close</button>

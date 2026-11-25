@@ -948,3 +948,15 @@ table.t .avatar { width: 34px; height: 34px; }
 .gal-view { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.9); display: grid; place-items: center; padding: 16px; }
 .gal-view-in { max-width: 520px; width: 100%; }
 .gal-view-in img, .gal-view-in video { width: 100%; max-height: 78vh; object-fit: contain; border-radius: 14px; background: #000; display: block; }
+/* Customer app: recharge offer reminder */
+.rc-pop .rc-ic { width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 24px; background: linear-gradient(135deg, #ffb020, #ff6a3d); }
+.rc-pop .rc-go { background: linear-gradient(135deg, #ff8a3d, #f41470); }
+
+/* Screen guard: no saving / dragging media, blur when the app is in the background, ID watermark */
+.guarded img, .guarded video { -webkit-user-drag: none; -webkit-touch-callout: none; user-select: none; }
+.guarded body { -webkit-touch-callout: none; }
+.guarded .call, .guarded .p-photo, .guarded .gal, .guarded .gal-view { user-select: none; -webkit-user-select: none; }
+.privacy-hide #root { filter: blur(28px); }
+.privacy-hide body::after { content: 'Milo Julo'; position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: rgba(10,10,12,.85); color: #fff; font: 800 28px/1 Inter, system-ui, sans-serif; }
+.wm { position: fixed; inset: -20%; z-index: 9000; pointer-events: none; display: flex; flex-wrap: wrap; align-content: space-around; justify-content: space-around; gap: 70px 50px;
+  transform: rotate(-24deg); opacity: .045; color: #fff; font: 700 15px/1 Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; }

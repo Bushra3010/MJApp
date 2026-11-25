@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import Icon from '../../components/Icon.jsx';
 import { useUnread } from '../../lib/useUnread.js';
+import RechargeReminder from '../../components/RechargeReminder.jsx';
 
 export default function UserShell() {
   const unread = useUnread();
   return (
     <div className="app-shell">
+      <RechargeReminder />
       <Outlet />
       <nav className="bottom-nav labeled" aria-label="Main">
         <NavLink to="/app" end><Icon name="home" size={24} /><span>Discover</span></NavLink>

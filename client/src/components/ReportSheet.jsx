@@ -3,7 +3,7 @@ import Sheet from './Sheet.jsx';
 import { api } from '../lib/api.js';
 import { useToast } from '../lib/toast.jsx';
 
-const REASONS = ['Rude or abusive', 'Sexual or inappropriate content', 'Fake profile', 'Asking for money / scam', 'Under 18', 'Other'];
+const REASONS = ['Shared phone number / contact details', 'Leaking app data or screenshots', 'Rude or abusive', 'Sexual or inappropriate content', 'Fake profile', 'Asking for money / scam', 'Under 18', 'Other'];
 
 export default function ReportSheet({ target, onClose, onBlocked }) {
   const toast = useToast();

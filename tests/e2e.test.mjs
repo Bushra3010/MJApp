@@ -610,7 +610,7 @@ try {
   const cs = await req(`/conversations/${cv.id}/messages`, { method: 'POST', body: { body: 'my whatsapp is 98765 43210' } }, HV);
   assert.equal(cs.status, 400); assert.equal(cs.body.code, 'CONTACT_BLOCKED');
   assert.ok((await req('/host/alerts', {}, HV)).body.alerts.some((a) => a.kind === 'warning')); ok('host message with a phone/WhatsApp number is stopped and the host is warned');
-  assert.equal((await req('/me', { method: 'PATCH', body: { bio: 'insta id priya_23' } }, HV)).status, 400); ok('contact details are not allowed in the host profile either');
+  assert.equal((await req('/me', { method: 'PATCH', body: { bio: 'insta id priya_23' } }, HV)).status, 403); ok('contact details are not allowed in the host profile either (2nd attempt bans)');
   assert.equal((await req('/me', {}, HV)).status, 401); ok('after 2 attempts the host is blocked automatically');
   const hvLogin = await req('/auth/login', { method: 'POST', app: 'host', body: { email: HV.user.email, password: 'secret123' } });
   assert.equal(hvLogin.status, 403); assert.match(hvLogin.body.error, /contact details/);
@@ -622,6 +622,14 @@ try {
   assert.equal((await req(`/conversations/${cv.id}/messages`, { method: 'POST', body: { body: 'call 9876543210' } }, U)).status, 404);
   const cvU = (await req('/conversations', { method: 'POST', body: { hostId: HL.user.id } }, UV)).body;
   assert.equal((await req(`/conversations/${cvU.id}/messages`, { method: 'POST', body: { body: 'call me 9876543210' } }, UV)).body.code, 'CONTACT_BLOCKED'); ok('members cannot send numbers either');
+  await req('/admin/settings', { method: 'PATCH', body: { contact_block_after: 1 } }, A);
+  const banU = (await signup({ name: 'Leaky Member' }, 'user')).body;
+  const cvB = (await req('/conversations', { method: 'POST', body: { hostId: HL.user.id } }, banU)).body;
+  const banRes = await req(`/conversations/${cvB.id}/messages`, { method: 'POST', body: { body: 'mera whatsapp 98765 43210' } }, banU);
+  assert.equal(banRes.status, 403); assert.equal(banRes.body.code, 'BANNED');
+  assert.equal((await req('/me', {}, banU)).status, 401);
+  assert.ok((await req('/admin/violations', {}, A)).body.some((v) => v.user_id === banU.user.id && v.role === 'user')); ok('with the limit at 1, a member who shares a number is banned at once and shows up for admin review');
+  assert.equal((await req(`/admin/users/${banU.user.id}`, { method: 'PATCH', body: { status: 'active' } }, A)).status, 200); ok('admin can unban a member');
   for (const s of [hvs, uvs, uns, d1s, d2s]) s.close();
 
   // 9. identity + gender verification before working

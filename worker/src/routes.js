@@ -246,7 +246,7 @@ export function buildApi(h) {
     if (u.role === 'host') {
       for (const k of ['name', 'bio', 'city']) {
         const why = f[k] && findContact(f[k]);
-        if (why) { recordViolation(u, null, f[k], `${why} in profile`); throw bad(CONTACT_ERROR); }
+        if (why) { if (recordViolation(u, null, f[k], `${why} in profile`)) throw bad(BANNED_ERROR, 403); throw bad(CONTACT_ERROR); }
       }
     }
     for (const [k, v] of Object.entries(f)) db.prepare(`UPDATE users SET ${k} = ? WHERE id = ?`).run(v, u.id);
@@ -413,21 +413,29 @@ export function buildApi(h) {
 
   // ================= contact-sharing protection =================
   /** Log a host's attempt to share contact details; warn them and block the account once it happens too often. */
+  /** Contact sharing by a host or a member: logged for admin review; after the limit in Settings the account is banned. Returns true if banned. */
   const recordViolation = (u, convId, text, reason) => {
-    if (u.role !== 'host') return;
     db.prepare('INSERT INTO contact_violations (user_id, conversation_id, body, reason) VALUES (?,?,?,?)').run(u.id, convId, String(text).slice(0, 500), reason);
     const n = db.prepare('SELECT COUNT(*) n FROM contact_violations WHERE user_id = ?').get(u.id).n;
     const max = h.setting('contact_block_after');
     if (max > 0 && n >= max) {
-      db.prepare("UPDATE users SET status = 'blocked', block_reason = ? WHERE id = ?").run(`Blocked automatically: tried to share contact details ${n} times`, u.id);
-      db.prepare('UPDATE host_profiles SET online = 0 WHERE user_id = ?').run(u.id);
-      h.broadcast('host:status', { id: u.id, online: 0, busy: 0 });
-      h.disconnectUser(u.id);
-    } else {
-      addAlert(h, u.id, 'warning', '⚠️ Contact sharing is not allowed',
-        `Your message was not sent. Sharing phone, WhatsApp or other contact details breaks the rules.${max > 0 ? ` Warning ${n} of ${max} — your account will be blocked after ${max}.` : ''}`, '/guidelines');
+      db.prepare("UPDATE users SET status = 'blocked', block_reason = ? WHERE id = ?").run(`Banned: tried to share contact details${n > 1 ? ` ${n} times` : ''}`, u.id);
+      if (u.role === 'host') {
+        db.prepare('UPDATE host_profiles SET online = 0 WHERE user_id = ?').run(u.id);
+        h.broadcast('host:status', { id: u.id, online: 0, busy: 0 });
+      }
+      h.toAdmins('admin:violation', { userId: u.id });
+      // let the reply reach the app before the socket closes
+      setTimeout(() => h.disconnectUser(u.id), 500);
+      return true;
     }
+    if (u.role === 'host') {
+      addAlert(h, u.id, 'warning', '⚠️ Contact sharing is not allowed',
+        `Your message was not sent. Sharing phone, WhatsApp or other contact details breaks the rules.${max > 0 ? ` Warning ${n} of ${max} — your account will be banned after ${max}.` : ''}`, '/guidelines');
+    }
+    return false;
   };
+  const BANNED_ERROR = 'Your account has been banned for sharing contact details. Contact support if you think this is a mistake.';
 
   // ================= customers (for hosts) =================
   const yearsOld = (d) => { const b = new Date(d); if (Number.isNaN(+b)) return null; const n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a > 0 && a < 120 ? a : null; };
@@ -530,7 +538,10 @@ export function buildApi(h) {
     const q = chatQuota(conv, u.id);
     if (q.left === 0) throw Object.assign(bad(`Chat limit reached (${q.limit} messages). Continue with an audio or video call.`, 403), { extra: { code: 'CHAT_LIMIT' } });
     const why = findContact(text);
-    if (why) { recordViolation(u, conv.id, text, why); throw Object.assign(bad(CONTACT_ERROR), { extra: { code: 'CONTACT_BLOCKED' } }); }
+    if (why) {
+      if (recordViolation(u, conv.id, text, why)) throw Object.assign(bad(BANNED_ERROR, 403), { extra: { code: 'BANNED' } });
+      throw Object.assign(bad(CONTACT_ERROR), { extra: { code: 'CONTACT_BLOCKED' } });
+    }
     if (u.role === 'user') {
       const cost = h.setting('chat_cost');
       if (cost > 0) {
@@ -1051,7 +1062,7 @@ export function buildApi(h) {
   }));
 
   // contact-sharing attempts by hosts
-  A.get('/violations', R(() => db.prepare(`SELECT v.*, u.name, u.email, u.status AS user_status, u.block_reason,
+  A.get('/violations', R(() => db.prepare(`SELECT v.*, u.name, u.email, u.role, u.status AS user_status, u.block_reason,
       (SELECT COUNT(*) FROM contact_violations x WHERE x.user_id = v.user_id) total
     FROM contact_violations v JOIN users u ON u.id = v.user_id ORDER BY (v.status = 'open') DESC, v.id DESC LIMIT 500`).all()));
   A.patch('/violations/:id', R(async (c) => {

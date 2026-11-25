@@ -55,7 +55,6 @@ export function RechargeProvider({ children }) {
           {cfg?.payments === 'test' && <div className="test-banner">Test mode: packs are credited instantly without payment.</div>}
           {cfg?.payments === 'off' && <div className="test-banner">Buying coins is temporarily unavailable.</div>}
           {!cfg ? <div className="spinner" /> : <PackList packs={cfg.packs} onBuy={buy} buying={buying} disabled={cfg.payments === 'off'} />}
-          <p className="faint" style={{ textAlign: 'center', marginTop: 10 }}>Secure payments by Razorpay · UPI, cards, netbanking</p>
         </Sheet>
       )}
     </Ctx.Provider>

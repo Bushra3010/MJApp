@@ -45,7 +45,6 @@ export default function Wallet() {
         {cfg.payments === 'off' && <div className="test-banner">Buying coins is temporarily unavailable.</div>}
         <div className="section-title">Add coins</div>
         <PackList packs={w?.packs || cfg.packs || []} onBuy={buy} buying={buying} disabled={cfg.payments === 'off'} />
-        <p className="faint" style={{ marginTop: 10, marginBottom: 8 }}>Secure payments by Razorpay · UPI, cards, netbanking, wallets. <a className="link" href="/refunds">Refund policy</a></p>
         <div className="section-title">Every coin, accounted for</div>
         <div className="filters">
           {[['all', 'All'], ['topup', 'Top-up record'], ['spend', 'Spending history']].map(([k, l]) => (

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import { CallProvider } from './lib/call.jsx';
 import CallOverlay from './components/CallOverlay.jsx';
+import ScreenGuard from './components/ScreenGuard.jsx';
 import Landing from './pages/Landing.jsx';
 import HostLanding from './pages/host/HostLanding.jsx';
 import { APP } from './apps.js';
@@ -124,6 +125,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       {APP !== 'admin' && <CallOverlay />}
+      {APP !== 'admin' && <ScreenGuard user={user} />}
       </RechargeProvider>
     </CallProvider>
   );
